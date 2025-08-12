@@ -72,7 +72,7 @@ Logic:
 - `POST /api/credits/book?id=<unique_id>&receiver=<receiver_id>&value=<value>`
 - `GET /api/resource/total?id=<unique_id>&resource=<resource>` (where `resource` is optional, returns n-tuple of total for each resource, if not specified)
 - `GET /api/resource/hourly?id=<unique_id>&resource=<resource>` (where `resource` is optional, returns n-tuple of hourly for each resource, if not specified)
-- `POST /api/resource/hourly?id=<unique_id>&receiver=<receiver_id>&resource=<resource>&value=<value>`
+- `POST /api/resource/book?id=<unique_id>&receiver=<receiver_id>&resource=<resource>&value=<value>` (where `resource` is optional, expects `value` to be a n-tuple if not specified)
 - `GET /api/subscriptions?id=<unique_id>` (where `id` is optional, if not specified, return *all* subscriptions)
 - `POST /api/subscription/add?id=<unique_id>` (where JSON payload defines the subscription)
 - `POST /api/subscription/remove?id=<unique_id>&subscription=<subscription_id>`
