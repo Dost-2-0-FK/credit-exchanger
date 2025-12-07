@@ -1,18 +1,8 @@
-use actix_web::{App, HttpResponse, HttpServer, Responder, get, middleware::Logger, post, web};
+use actix_web::{App, HttpServer, middleware::Logger, web};
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+use crate::service::{echo, hello};
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
-
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
-}
+mod service;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -23,9 +13,7 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(logger)
-            .service(hello)
-            .service(echo)
-            .route("/hey", web::get().to(manual_hello))
+            .service(web::scope("/api").service(hello).service(echo))
     })
     .bind(("127.0.0.1", 8080))?
     .run()
