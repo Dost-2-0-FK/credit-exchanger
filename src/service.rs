@@ -41,31 +41,7 @@ struct AllResourcesBooking {
     id: String,
     receiver: String,
     #[serde(rename = "value")]
-    values: NonEmptyVec<u32>,
-}
-
-/// Enforce on deserialization that the inner vector must not be empty.
-#[derive(Debug, derive_more::Deref)]
-struct NonEmptyVec<T>(Vec<T>);
-
-impl<'de, T> Deserialize<'de> for NonEmptyVec<T>
-where
-    T: Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let vector = Vec::<T>::deserialize(deserializer)?;
-
-        if vector.is_empty() {
-            return Err(serde::de::Error::custom(
-                "must provide at least one element",
-            ));
-        }
-
-        Ok(Self(vector))
-    }
+    values: Vec<u32>,
 }
 
 #[post("/resource/book")]
