@@ -46,7 +46,7 @@ Units
 #### Credits
 
 General: 
-- A credit can be "money" or "recourse"
+- A credit can be "money" or "resource"
 
 Attributes: 
 - `total: Float`
