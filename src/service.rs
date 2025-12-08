@@ -28,6 +28,7 @@ async fn post_credit_booking(credit_booking: Query<CreditBooking>) -> impl Respo
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct SingleResourceBooking {
     id: String,
     receiver: String,
@@ -37,6 +38,7 @@ struct SingleResourceBooking {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct AllResourcesBooking {
     id: String,
     receiver: String,
@@ -62,3 +64,8 @@ async fn post_resource_booking(
 
     HttpResponse::Ok()
 }
+
+// TODO: curl -vv -X POST "http://127.0.0.1:8080/api/resource/book?id=book-id-123&receiver=rec-id-123&value=1&resource=resrouce-123&value=2"
+// does not throw an error, AllResourcesBooking is matched and resources param is ignored. This should throw an error instead
+// maybe it makes sense to use a request body here instead of query params
+// https://medium.com/@arijitbasubd/understanding-http-methods-when-to-use-url-params-query-params-and-request-body-9ca94baefbf7
