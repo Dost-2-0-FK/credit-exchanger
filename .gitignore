@@ -210,3 +210,6 @@ __marimo__/
 # Added by cargo
 
 /target
+
+# git related
+.gitconfig
