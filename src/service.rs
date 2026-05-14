@@ -1,30 +1,17 @@
-use actix_web::{Either, HttpResponse, Responder, get, post};
-use actix_web_lab::extract::Query;
+use std::{collections::HashMap, sync::Arc};
+
+use actix_web::{HttpResponse, Responder, get, patch, post, web::{Path}};
 use serde::Deserialize;
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+use crate::{api::user::User, domain::{base_user::BaseUser, bloc_user::BlocUser, credit::Credit}};
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
-
+// TODO: adjust those structs according to new api contract and put into dedicated module
 #[derive(Deserialize, Debug)]
 struct CreditBooking {
     id: String,
     receiver: String,
     // TODO check whether value is always positive and not a float
     value: u32,
-}
-
-#[post("/credits/book")]
-/// `POST /api/credits/book?id=<unique_id>&receiver=<receiver_id>&value=<value>`
-async fn post_credit_booking(credit_booking: Query<CreditBooking>) -> impl Responder {
-    let _credit_booking = credit_booking.into_inner();
-    HttpResponse::Ok()
 }
 
 #[derive(Deserialize, Debug)]
@@ -46,26 +33,51 @@ struct AllResourcesBooking {
     values: Vec<u32>,
 }
 
-#[post("/resource/book")]
-/// `POST /api/resource/book?id=<unique_id>&receiver=<receiver_id>&resource=<resource>&value=<value>`
-async fn post_resource_booking(
-    resource_booking: Either<Query<SingleResourceBooking>, Query<AllResourcesBooking>>,
-) -> impl Responder {
-    match resource_booking {
-        Either::Left(single) => {
-            // handle single resource booking
-            log::debug!("got single: {single:?}");
-        }
-        Either::Right(all) => {
-            // handle all resource booking
-            log::debug!("got all: {all:?}");
-        }
-    }
+#[get("/")]
+async fn hello() -> impl Responder {
+    HttpResponse::Ok().body("Hello world!")
+}
 
+#[post("/echo")]
+async fn echo(req_body: String) -> impl Responder {
+    HttpResponse::Ok().body(req_body)
+}
+
+// ### USERS
+
+#[get("/users/{user_id}")]
+// `GET /api/users/{user_id}`
+async fn get_user(_user_id: Path<String>) -> impl Responder {
+    // TODO: implement
+    let credit = Arc::new(Credit::new(
+        1.1,
+        2.2,
+        vec![],
+        vec![],
+    ));
+    let resources: HashMap<String, Credit> = HashMap::new();
+
+    let user = User::Bloc(BaseUser::<BlocUser>::new(resources, "xxx", credit));
+    HttpResponse::Ok().json(user)
+}
+
+#[get("/users")]
+// `GET /api/users`    
+async fn get_users() -> impl Responder {
+    // TODO: implement
     HttpResponse::Ok()
 }
 
-// TODO: curl -vv -X POST "http://127.0.0.1:8080/api/resource/book?id=book-id-123&receiver=rec-id-123&value=1&resource=resrouce-123&value=2"
-// does not throw an error, AllResourcesBooking is matched and resources param is ignored. This should throw an error instead
-// maybe it makes sense to use a request body here instead of query params
-// https://medium.com/@arijitbasubd/understanding-http-methods-when-to-use-url-params-query-params-and-request-body-9ca94baefbf7
+#[post("/users")]
+// `POST /api/users`
+async fn create_user() -> impl Responder {
+    // TODO: implement
+    HttpResponse::Ok()
+}
+
+#[patch("/users/{user_id}")]
+// `PATCH /api/users/{user_id}`
+async fn update_user() -> impl Responder {
+    // TODO: implement
+    HttpResponse::Ok()
+}

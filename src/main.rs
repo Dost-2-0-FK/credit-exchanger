@@ -1,10 +1,12 @@
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use anyhow::{Context, Result};
 
-use crate::{config::Config, service::{echo, hello, post_credit_booking, post_resource_booking}};
+use crate::{config::Config, service::{echo, hello, get_user, get_users, create_user, update_user}};
 
 mod service;
 mod config;
+mod domain;
+mod api;
 
 async fn setup() -> Result<()> {
     env_logger::init();
@@ -29,8 +31,10 @@ async fn main() -> std::io::Result<()> {
             web::scope("/api")
                 .service(hello)
                 .service(echo)
-                .service(post_credit_booking)
-                .service(post_resource_booking),
+                .service(get_user)
+                .service(get_users)
+                .service(create_user)
+                .service(update_user),
         )
     })
     .bind(("127.0.0.1", 8080))?
