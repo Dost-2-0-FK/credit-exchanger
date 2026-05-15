@@ -1,12 +1,14 @@
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use anyhow::{Context, Result};
+use mongodb::bson::doc;
 
-use crate::{config::Config, service::{echo, hello, get_user, get_users, create_user, update_user}};
+use crate::{config::Config, mongo_client::MongoClient, routes::configure_routes};
 
-mod service;
+mod db;
 mod config;
 mod domain;
 mod api;
+mod routes;
 
 async fn setup() -> Result<()> {
     env_logger::init();
@@ -24,18 +26,24 @@ async fn main() -> std::io::Result<()> {
             std::io::Error::other(e)
         })?;
 
-    HttpServer::new(|| {
-        let logger = Logger::default();
+    let uri = "mongodb://localhost:27017";
+    let database = "test_db";
 
-        App::new().wrap(logger).service(
-            web::scope("/api")
-                .service(hello)
-                .service(echo)
-                .service(get_user)
-                .service(get_users)
-                .service(create_user)
-                .service(update_user),
-        )
+    // Initialize MongoDB client
+    let client = MongoClient::new(uri, database).await.expect("Failed to initialize MongoDB client");
+
+    // // Example: Insert a document
+    // let document = doc! { "name": "John Doe", "age": 30 };
+    // client.insert_document("users", document).await.expect("Failed to insert document");
+
+    HttpServer::new(move || {
+        let logger = Logger::default();
+        let mongo_client = web::Data::new(client.clone());
+
+        App::new()
+            .wrap(logger)
+            .app_data(mongo_client)
+            .configure(configure_routes)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

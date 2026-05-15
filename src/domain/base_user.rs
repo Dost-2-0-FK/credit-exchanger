@@ -23,7 +23,7 @@ impl<T> BaseUser<T> {
 }
 
 impl<T> BaseUser<T> {
-    pub(crate) fn get_id(&self) -> String {
-        self.id.clone()
+    pub(crate) fn id(&self) -> &str {
+        &self.id
     }
 }
