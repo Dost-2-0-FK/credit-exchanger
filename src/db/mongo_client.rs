@@ -1,5 +1,6 @@
-use mongodb::{Client, options::ClientOptions};
 use crate::db::error::Result;
+use mongodb::bson::oid::ObjectId;
+use mongodb::{Client, options::ClientOptions};
 
 #[derive(Clone)]
 pub struct MongoClient {
@@ -20,20 +21,27 @@ impl MongoClient {
     pub(crate) fn database_name(&self) -> &str {
         &self.database_name
     }
-    
-    pub(crate) async fn get_document(&self, collection: &str, id: &str) -> Result<Option<mongodb::bson::Document>> {
+
+    pub(crate) async fn get_document_by_object_id(
+        &self,
+        collection: &str,
+        id: &ObjectId,
+    ) -> Result<Option<mongodb::bson::Document>> {
         let db = self.client.database(&self.database_name);
-        let coll= db.collection(collection);
+        let coll = db.collection(collection);
         let filter = mongodb::bson::doc! { "_id": id };
         let document = coll.find_one(filter, None).await?;
         Ok(document)
     }
 
-    pub(crate) async fn insert_document(&self, collection: &str, document: impl Into<mongodb::bson::Document>) -> Result<()> {
+    pub(crate) async fn insert_document(
+        &self,
+        collection: &str,
+        document: impl Into<mongodb::bson::Document>,
+    ) -> Result<()> {
         let db = self.client.database(&self.database_name);
         let coll = db.collection(collection);
         coll.insert_one(document.into(), None).await?;
         Ok(())
     }
-
 }

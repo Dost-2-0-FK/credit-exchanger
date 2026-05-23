@@ -5,6 +5,7 @@ pub enum Error {
     #[display("Not found: {_0}")]
     NotFound(#[error(not(source))] &'static str),
     DbError(#[from] mongodb::error::Error),
-    DbBsonError(#[from] mongodb::bson::de::Error),
+    DbBsonDeError(#[from] mongodb::bson::de::Error),
+    DbBsonSerError(#[from] mongodb::bson::ser::Error),
+    DbObjectIdError(#[from] mongodb::bson::oid::Error),
 }
-

@@ -28,17 +28,17 @@ impl Credit {
 }
 
 // Added a mapping function to convert between domain::Credit and db::Credit
-impl From<Credit> for crate::db::credit::Credit {
-    fn from(domain_credit: Credit) -> Self {
-        crate::db::credit::Credit::new(
-            domain_credit.total,
-            domain_credit.last_day_average,
-            domain_credit
-                .subscriptions
-                .iter()
-                .map(|domain_subscription| domain_subscription.id().to_string()) 
-                .collect(),
-            domain_credit.history,
-        )
-    }
-}
+// impl From<Credit> for crate::db::credit::Credit {
+//     fn from(domain_credit: Credit) -> Self {
+//         crate::db::credit::Credit::new(
+//             domain_credit.total,
+//             domain_credit.last_day_average,
+//             domain_credit
+//                 .subscriptions
+//                 .iter()
+//                 .map(|domain_subscription| domain_subscription.id().to_string())
+//                 .collect(),
+//             domain_credit.history,
+//         )
+//     }
+// }

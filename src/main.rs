@@ -1,13 +1,12 @@
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use anyhow::{Context, Result};
-use mongodb::bson::doc;
 
-use crate::{config::Config, mongo_client::MongoClient, routes::configure_routes};
+use crate::{config::Config, db::mongo_client::MongoClient, routes::configure_routes};
 
-mod db;
-mod config;
-mod domain;
 mod api;
+mod config;
+mod db;
+mod domain;
 mod routes;
 
 async fn setup() -> Result<()> {
@@ -22,15 +21,17 @@ async fn setup() -> Result<()> {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     setup().await.map_err(|e| {
-            log::error!("{:#}", e);
-            std::io::Error::other(e)
-        })?;
+        log::error!("{:#}", e);
+        std::io::Error::other(e)
+    })?;
 
     let uri = "mongodb://localhost:27017";
     let database = "test_db";
 
     // Initialize MongoDB client
-    let client = MongoClient::new(uri, database).await.expect("Failed to initialize MongoDB client");
+    let client = MongoClient::new(uri, database)
+        .await
+        .expect("Failed to initialize MongoDB client");
 
     // // Example: Insert a document
     // let document = doc! { "name": "John Doe", "age": 30 };

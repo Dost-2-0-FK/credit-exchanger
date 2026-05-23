@@ -1,4 +1,5 @@
 use derive_more::Constructor;
+use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -10,7 +11,8 @@ use crate::db::error::Result;
 
 #[derive(Debug, Serialize, Deserialize, Constructor)]
 pub(crate) struct Subscription {
-    id: String,
+    #[serde(rename = "_id")]
+    id: ObjectId,
     receiver: u32, // the receivers unique id
     value: f32,    // value in percentage, might be positive or negative
     subscription_type: SubscriptionType,
@@ -18,6 +20,7 @@ pub(crate) struct Subscription {
     priority: u32,
 }
 
+#[derive(Constructor)]
 pub(crate) struct SubscriptionsRepository {
     db: MongoClient,
 }
@@ -25,10 +28,13 @@ pub(crate) struct SubscriptionsRepository {
 impl SubscriptionsRepository {
     pub(crate) async fn get_subscription(
         &self,
-        id: &str,
+        id: &ObjectId,
     ) -> Result<Option<domain::subscription::Subscription>> {
         // Query the Subscription document from the database
-        let subscription_doc = self.db.get_document("subscription", id).await?;
+        let subscription_doc = self
+            .db
+            .get_document_by_object_id("subscription", id)
+            .await?;
 
         // Deserialize the Subscription document
         let Some(subscription_doc) = subscription_doc else {
@@ -38,12 +44,31 @@ impl SubscriptionsRepository {
 
         // Build and return the domain Subscription object
         let subscription = domain::subscription::Subscription::new(
-            db_subscription.id,
+            db_subscription.id.to_hex(),
             db_subscription.receiver,
             db_subscription.value,
             db_subscription.subscription_type,
             db_subscription.priority,
         );
+        Ok(Some(subscription))
+    }
+
+    pub(crate) async fn insert_subscription(
+        &self,
+        subscription: domain::subscription::Subscription,
+    ) -> Result<Option<domain::subscription::Subscription>> {
+        // Persist the domain ID as MongoDB `_id`.
+        let db_subscription = Subscription::new(
+            ObjectId::parse_str(subscription.id())?,
+            subscription.receiver(),
+            subscription.value(),
+            subscription.subscription_type(),
+            subscription.priority(),
+        );
+
+        // Convert to MongoDB document and insert
+        let doc = mongodb::bson::to_document(&db_subscription)?;
+        self.db.insert_document("subscription", doc).await?;
         Ok(Some(subscription))
     }
 }

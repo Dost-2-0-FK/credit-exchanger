@@ -41,9 +41,10 @@ impl CreditRepository {
         // Query the Subscription repository for credit subscriptions
         let domain_subscriptions = stream::iter(db_credit.subscription_ids.iter())
             .then(async |id| -> Result<_> {
+                let object_id = mongodb::bson::oid::ObjectId::parse_str(id)?;
                 let subscription = self
                     .subscription_repository
-                    .get_subscription(id)
+                    .get_subscription(&object_id)
                     .await?
                     .map(Arc::new)
                     .ok_or(Error::NotFound("matching subscription for credit"))?;
