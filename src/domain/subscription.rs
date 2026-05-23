@@ -10,7 +10,7 @@ pub(crate) enum SubscriptionType {
     Contract,
 }
 
-#[derive(Serialize, Constructor, Clone)]
+#[derive(Serialize, Deserialize, Constructor, Clone)]
 pub(crate) struct Subscription {
     id: String,
     receiver: u32, // the receivers unique id

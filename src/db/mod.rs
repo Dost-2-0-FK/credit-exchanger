@@ -1,4 +1,10 @@
+pub mod base_user;
+pub mod bloc_user;
 pub mod credit;
-pub mod subscription;
-pub mod mongo_client;
 pub mod error;
+pub mod individual_user;
+pub mod mongo_client;
+pub mod subscription;
+pub mod unit_user;
+pub mod user;
+pub mod zone_user;

@@ -11,12 +11,11 @@ use crate::{
     api::{
         credit::{CreateCreditRequest, GetCreditResponse},
         subscription::{CreateSubscriptionRequest, GetSubscriptionResponse},
-        user::User,
+        user::{CreateUserRequest, PatchUserRequest, User, UserType},
     },
     db::{
-        credit::CreditRepository,
-        mongo_client::MongoClient,
-        subscription::SubscriptionsRepository,
+        credit::CreditRepository, mongo_client::MongoClient, subscription::SubscriptionsRepository,
+        user::UsersRepository,
     },
     domain::{self, base_user::BaseUser, bloc_user::BlocUser, credit::Credit},
 };
@@ -63,43 +62,111 @@ async fn echo(req_body: String) -> impl Responder {
 
 #[get("/users/{user_id}")]
 // `GET /api/users/{user_id}`
-async fn get_user(_user_id: Path<String>) -> impl Responder {
-    // TODO: implement
-    let credit = Arc::new(Credit::new(1.1, 2.2, vec![], vec![]));
-    let resources: HashMap<String, Credit> = HashMap::new();
+async fn get_user(client: web::Data<MongoClient>, user_id: Path<String>) -> impl Responder {
+    let user_id = user_id.into_inner();
+    let repository = UsersRepository::new(client.get_ref().clone());
 
-    let user = User::Bloc(BaseUser::<BlocUser>::new(resources, "xxx", credit));
-    HttpResponse::Ok().json(user)
+    match repository.get_user(&user_id).await {
+        Ok(Some(user)) => HttpResponse::Ok().json(user),
+        Ok(None) => HttpResponse::NotFound().finish(),
+        Err(err) => HttpResponse::InternalServerError().body(format!("Failed to get user: {err}")),
+    }
 }
 
 #[get("/users")]
 // `GET /api/users`
-async fn get_users() -> impl Responder {
-    // TODO: implement
-    HttpResponse::Ok()
+async fn get_users(client: web::Data<MongoClient>) -> impl Responder {
+    let repository = UsersRepository::new(client.get_ref().clone());
+
+    match repository.list_users().await {
+        Ok(users) => HttpResponse::Ok().json(users),
+        Err(err) => {
+            HttpResponse::InternalServerError().body(format!("Failed to list users: {err}"))
+        }
+    }
 }
 
 #[post("/users")]
 // `POST /api/users`
 async fn create_user(
     client: web::Data<MongoClient>,
-    user: web::Json<serde_json::Value>,
+    body: web::Json<CreateUserRequest>,
 ) -> impl Responder {
-    let document = doc! { "name": user["name"].as_str().unwrap_or("Unknown"), "age": user["age"].as_i64().unwrap_or(0) };
+    let repository = UsersRepository::new(client.get_ref().clone());
+    let body = body.into_inner();
+    let generated_user_id = mongodb::bson::oid::ObjectId::new().to_hex();
+    let credit = Arc::new(Credit::new(0.0, 0.0, vec![], vec![]));
+    let resources: HashMap<String, Credit> = HashMap::new();
 
-    match client.insert_document("users", document).await {
-        Ok(_) => HttpResponse::Ok().body("User created successfully"),
+    let user = match body.user_type() {
+        UserType::Bloc => User::Bloc(BaseUser::<BlocUser>::new(
+            resources,
+            &generated_user_id,
+            credit,
+        )),
+        UserType::Zone => User::Zone(
+            domain::base_user::BaseUser::<domain::zone_user::ZoneUser>::new(
+                resources,
+                &generated_user_id,
+                credit,
+            ),
+        ),
+        UserType::Individual => User::Individual(domain::base_user::BaseUser::<
+            domain::individual_user::IndividualUser,
+        >::new(&generated_user_id, credit)),
+        UserType::Unit => User::Unit(
+            domain::base_user::BaseUser::<domain::unit_user::UnitUser>::new(
+                &generated_user_id,
+                credit,
+            ),
+        ),
+    };
+
+    match repository.insert_user(user).await {
+        Ok(user) => HttpResponse::Created().json(user),
         Err(err) => {
-            HttpResponse::InternalServerError().body(format!("Failed to create user: {}", err))
+            HttpResponse::InternalServerError().body(format!("Failed to create user: {err}"))
         }
     }
 }
 
 #[patch("/users/{user_id}")]
 // `PATCH /api/users/{user_id}`
-async fn update_user() -> impl Responder {
-    // TODO: implement
-    HttpResponse::Ok()
+async fn update_user(
+    client: web::Data<MongoClient>,
+    user_id: Path<String>,
+    body: web::Json<PatchUserRequest>,
+) -> impl Responder {
+    let repository = UsersRepository::new(client.get_ref().clone());
+    let user_id = user_id.into_inner();
+    let body = body.into_inner();
+
+    let user = match repository.get_db_user(&user_id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => return HttpResponse::NotFound().finish(),
+        Err(err) => {
+            return HttpResponse::InternalServerError().body(format!("Failed to get user: {err}"));
+        }
+    };
+
+    if !user.is_unit() {
+        return HttpResponse::MethodNotAllowed().body("Only unit users can be updated");
+    }
+
+    if body.credit_type() != "money" {
+        return HttpResponse::NotFound().body("Credit type not found for unit user");
+    }
+
+    match repository
+        .update_unit_last_day_average(&user_id, body.last_day_average())
+        .await
+    {
+        Ok(Some(user)) => HttpResponse::Ok().json(user),
+        Ok(None) => HttpResponse::NotFound().finish(),
+        Err(err) => {
+            HttpResponse::InternalServerError().body(format!("Failed to update user: {err}"))
+        }
+    }
 }
 
 // ### SUBSCRIPTIONS
@@ -114,12 +181,16 @@ async fn get_credit(client: web::Data<MongoClient>, credit_id: Path<String>) -> 
     let credit_id = credit_id.into_inner();
 
     match repository.get_credit(&credit_id).await {
-        Ok(Some(credit)) => HttpResponse::Ok().json(GetCreditResponse::from_credit(credit_id, credit)),
+        Ok(Some(credit)) => {
+            HttpResponse::Ok().json(GetCreditResponse::from_credit(credit_id, credit))
+        }
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(crate::db::error::Error::DbObjectIdError(_)) => {
             HttpResponse::BadRequest().body("Invalid credit id format")
         }
-        Err(err) => HttpResponse::InternalServerError().body(format!("Failed to get credit: {err}")),
+        Err(err) => {
+            HttpResponse::InternalServerError().body(format!("Failed to get credit: {err}"))
+        }
     }
 }
 

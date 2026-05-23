@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use derive_more::Constructor;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::subscription::Subscription;
 
-#[derive(Serialize, Constructor)]
+#[derive(Serialize, Deserialize, Constructor, Clone)]
 pub(crate) struct Credit {
     total: f32,
     last_day_average: f32,

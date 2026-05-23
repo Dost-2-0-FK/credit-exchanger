@@ -1,10 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::{base_user::BaseUser, credit::Credit};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct ZoneUser {
     resources: HashMap<String, Credit>,
 }
@@ -18,5 +18,11 @@ impl BaseUser<ZoneUser> {
             id.into(),
             credit,
         )
+    }
+}
+
+impl ZoneUser {
+    pub(crate) fn resources(&self) -> &HashMap<String, Credit> {
+        &self.resources
     }
 }

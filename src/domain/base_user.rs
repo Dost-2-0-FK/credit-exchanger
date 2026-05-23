@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::credit::Credit;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct BaseUser<T> {
     #[serde(flatten)]
     role: T,
@@ -25,5 +25,13 @@ impl<T> BaseUser<T> {
 impl<T> BaseUser<T> {
     pub(crate) fn id(&self) -> &str {
         &self.id
+    }
+
+    pub(crate) fn role(&self) -> &T {
+        &self.role
+    }
+
+    pub(crate) fn credit(&self) -> &Arc<Credit> {
+        &self.credit
     }
 }

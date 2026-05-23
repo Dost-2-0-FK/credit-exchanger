@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::domain::{base_user::BaseUser, credit::Credit};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct UnitUser {}
 
 impl BaseUser<UnitUser> {
