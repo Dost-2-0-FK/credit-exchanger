@@ -9,10 +9,15 @@ use serde::Deserialize;
 
 use crate::{
     api::{
+        credit::{CreateCreditRequest, GetCreditResponse},
         subscription::{CreateSubscriptionRequest, GetSubscriptionResponse},
         user::User,
     },
-    db::{mongo_client::MongoClient, subscription::SubscriptionsRepository},
+    db::{
+        credit::CreditRepository,
+        mongo_client::MongoClient,
+        subscription::SubscriptionsRepository,
+    },
     domain::{self, base_user::BaseUser, bloc_user::BlocUser, credit::Credit},
 };
 
@@ -99,6 +104,74 @@ async fn update_user() -> impl Responder {
 
 // ### SUBSCRIPTIONS
 
+#[get("/credits/{credit_id}")]
+// `GET /api/credits/{credit_id}`
+async fn get_credit(client: web::Data<MongoClient>, credit_id: Path<String>) -> impl Responder {
+    let repository = CreditRepository::new(
+        client.get_ref().clone(),
+        SubscriptionsRepository::new(client.get_ref().clone()),
+    );
+    let credit_id = credit_id.into_inner();
+
+    match repository.get_credit(&credit_id).await {
+        Ok(Some(credit)) => HttpResponse::Ok().json(GetCreditResponse::from_credit(credit_id, credit)),
+        Ok(None) => HttpResponse::NotFound().finish(),
+        Err(crate::db::error::Error::DbObjectIdError(_)) => {
+            HttpResponse::BadRequest().body("Invalid credit id format")
+        }
+        Err(err) => HttpResponse::InternalServerError().body(format!("Failed to get credit: {err}")),
+    }
+}
+
+#[post("/credits")]
+// `POST /api/credits`
+async fn create_credit(
+    client: web::Data<MongoClient>,
+    body: web::Json<CreateCreditRequest>,
+) -> impl Responder {
+    let body = body.into_inner();
+    let subscription_repository = SubscriptionsRepository::new(client.get_ref().clone());
+    let credit_repository = CreditRepository::new(
+        client.get_ref().clone(),
+        SubscriptionsRepository::new(client.get_ref().clone()),
+    );
+
+    let mut domain_subscriptions = Vec::with_capacity(body.subscription_ids().len());
+    for subscription_id in body.subscription_ids() {
+        let object_id = match mongodb::bson::oid::ObjectId::parse_str(subscription_id) {
+            Ok(object_id) => object_id,
+            Err(_) => return HttpResponse::BadRequest().body("Invalid subscription id format"),
+        };
+
+        let subscription = match subscription_repository.get_subscription(&object_id).await {
+            Ok(Some(subscription)) => subscription,
+            Ok(None) => {
+                return HttpResponse::NotFound().body("One or more subscriptions were not found");
+            }
+            Err(err) => {
+                return HttpResponse::InternalServerError()
+                    .body(format!("Failed to resolve subscriptions: {err}"));
+            }
+        };
+
+        domain_subscriptions.push(Arc::new(subscription));
+    }
+
+    let domain_credit = domain::credit::Credit::new(
+        body.total(),
+        body.last_day_average(),
+        domain_subscriptions,
+        body.history().to_vec(),
+    );
+
+    match credit_repository.insert_credit(domain_credit).await {
+        Ok(id) => HttpResponse::Created().json(GetCreditResponse::from_create_request(id, &body)),
+        Err(err) => {
+            HttpResponse::InternalServerError().body(format!("Failed to create credit: {err}"))
+        }
+    }
+}
+
 #[get("/subscriptions/{subscription_id}")]
 // `GET /api/subscriptions/{subscription_id}`
 async fn get_subscription(
@@ -157,6 +230,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .service(get_users)
         .service(create_user)
         .service(update_user)
+        .service(get_credit)
+        .service(create_credit)
         .service(get_subscription)
         .service(create_subscription);
 }

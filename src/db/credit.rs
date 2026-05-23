@@ -1,36 +1,41 @@
-use std::{ops::Sub, sync::Arc};
+use std::sync::Arc;
 
 use derive_more::Constructor;
 use futures_util::{StreamExt, TryStreamExt as _, stream};
+use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
-use crate::db::subscription::{Subscription, SubscriptionsRepository};
+use crate::db::subscription::SubscriptionsRepository;
 
-use crate::{
-    db::{self, credit, mongo_client::MongoClient},
-    domain,
-};
+use crate::{db::mongo_client::MongoClient, domain};
 
 use crate::db::error::{Error, Result};
 
 #[derive(Debug, Serialize, Deserialize, Constructor)]
 pub(crate) struct Credit {
-    id: String,
+    #[serde(rename = "_id")]
+    id: ObjectId,
     total: f32,
     last_day_average: f32,
     subscription_ids: Vec<String>,
     history: Vec<f32>,
 }
 
-struct CreditRepository {
+#[derive(Constructor)]
+pub(crate) struct CreditRepository {
     db: MongoClient,
     subscription_repository: SubscriptionsRepository,
 }
 
 impl CreditRepository {
-    async fn get_credit(&self, id: &str) -> Result<Option<domain::credit::Credit>> {
+    pub(crate) async fn get_credit(&self, id: &str) -> Result<Option<domain::credit::Credit>> {
+        let object_id = ObjectId::parse_str(id)?;
+
         // Query the Credit document from the database
-        let credit_doc = self.db.get_document("credit", id).await?;
+        let credit_doc = self
+            .db
+            .get_document_by_object_id("credit", &object_id)
+            .await?;
 
         // Deserialize the Credit document
         let Some(credit_doc) = credit_doc else {
@@ -63,7 +68,22 @@ impl CreditRepository {
         Ok(Some(credit))
     }
 
-    async fn post_credit(&self, credit: domain::credit::Credit) {
-        todo!()
+    pub(crate) async fn insert_credit(&self, credit: domain::credit::Credit) -> Result<String> {
+        let id = ObjectId::new();
+        let db_credit = Credit::new(
+            id,
+            credit.total(),
+            credit.last_day_average(),
+            credit
+                .subscriptions()
+                .iter()
+                .map(|domain_subscription| domain_subscription.id().to_string())
+                .collect(),
+            credit.history().to_vec(),
+        );
+
+        let doc = mongodb::bson::to_document(&db_credit)?;
+        self.db.insert_document("credit", doc).await?;
+        Ok(db_credit.id.to_hex())
     }
 }
