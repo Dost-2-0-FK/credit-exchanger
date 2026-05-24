@@ -94,31 +94,22 @@ async fn create_user(
 ) -> impl Responder {
     let repository = UsersRepository::new(client.get_ref().clone());
     let body = body.into_inner();
-    let generated_user_id = mongodb::bson::oid::ObjectId::new().to_hex();
+    let user_id = body.id();
     let credit = Arc::new(Credit::new(0.0, 0.0, vec![], vec![]));
     let resources: HashMap<String, Credit> = HashMap::new();
 
     let user = match body.user_type() {
-        UserType::Bloc => User::Bloc(BaseUser::<BlocUser>::new(
-            resources,
-            &generated_user_id,
-            credit,
-        )),
+        UserType::Bloc => User::Bloc(BaseUser::<BlocUser>::new(resources, user_id, credit)),
         UserType::Zone => User::Zone(
             domain::base_user::BaseUser::<domain::zone_user::ZoneUser>::new(
-                resources,
-                &generated_user_id,
-                credit,
+                resources, user_id, credit,
             ),
         ),
         UserType::Individual => User::Individual(domain::base_user::BaseUser::<
             domain::individual_user::IndividualUser,
-        >::new(&generated_user_id, credit)),
+        >::new(user_id, credit)),
         UserType::Unit => User::Unit(
-            domain::base_user::BaseUser::<domain::unit_user::UnitUser>::new(
-                &generated_user_id,
-                credit,
-            ),
+            domain::base_user::BaseUser::<domain::unit_user::UnitUser>::new(user_id, credit),
         ),
     };
 
@@ -169,7 +160,7 @@ async fn update_user(
     }
 }
 
-// ### SUBSCRIPTIONS
+// ### CREDITS
 
 #[get("/credits/{credit_id}")]
 // `GET /api/credits/{credit_id}`
@@ -242,6 +233,8 @@ async fn create_credit(
         }
     }
 }
+
+// ### SUBSCRIPTIONS
 
 #[get("/subscriptions/{subscription_id}")]
 // `GET /api/subscriptions/{subscription_id}`

@@ -21,10 +21,15 @@ pub(crate) enum User {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateUserRequest {
+    id: String,
     user_type: UserType,
 }
 
 impl CreateUserRequest {
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+    
     pub(crate) fn user_type(&self) -> UserType {
         self.user_type
     }
