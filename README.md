@@ -17,6 +17,33 @@ NOTE (on naming): Currently, `credit` refers to the object holding either "money
 ...
 ...
 
+## Testing
+
+### Run tests locally (ephemeral MongoDB)
+
+The project includes `scripts/test-with-ephemeral-mongo.sh`.
+It will:
+- start a temporary MongoDB container
+- run `cargo test`
+- remove the container when tests finish (or fail)
+
+Run all tests:
+
+```bash
+bash scripts/test-with-ephemeral-mongo.sh
+```
+
+Run a specific test:
+
+```bash
+bash scripts/test-with-ephemeral-mongo.sh test_get_users_returns_all
+```
+
+Notes:
+- The script sets `TEST_MONGODB_URI` automatically to the temporary container.
+- Test databases are unique per test execution to avoid cross-test pollution.
+- The container is removed at the end, so test data does not accumulate.
+
 ## Specification 
 
 ### Types

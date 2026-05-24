@@ -299,3 +299,479 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .service(get_subscription)
         .service(create_subscription);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{App, test};
+    use std::env;
+
+    const TEST_DB_URI_ENV: &str = "TEST_MONGODB_URI";
+    const TEST_DB_PREFIX: &str = "credit_exchanger_test";
+
+    fn test_db_uri() -> String {
+        env::var(TEST_DB_URI_ENV).unwrap_or_else(|_| "mongodb://localhost:27017".to_string())
+    }
+
+    async fn test_client() -> web::Data<crate::db::mongo_client::MongoClient> {
+        let db_name = format!(
+            "{}_{}",
+            TEST_DB_PREFIX,
+            mongodb::bson::oid::ObjectId::new().to_hex()
+        );
+        let client = crate::db::mongo_client::MongoClient::new(&test_db_uri(), &db_name)
+            .await
+            .expect("Failed to connect to test MongoDB");
+
+        web::Data::new(client)
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_get_user_returns_user() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(get_user),
+        )
+        .await;
+
+        let create_req_1 = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "alice", "userType": "individual"}))
+            .to_request();
+        test::call_service(&app, create_req_1).await;
+
+        let create_req_2 = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "bob", "userType": "unit"}))
+            .to_request();
+        test::call_service(&app, create_req_2).await;
+
+        let get_req = test::TestRequest::get().uri("/users/alice").to_request();
+        let resp = test::call_service(&app, get_req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["id"], "alice");
+        assert_eq!(body["userType"], "individual")
+    }
+
+    #[actix_web::test]
+    async fn test_get_user_not_found() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(get_user)).await;
+        let req = test::TestRequest::get()
+            .uri("/users/no_such_user_xyz")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn test_get_users_returns_empty() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(get_users)).await;
+        let req = test::TestRequest::get().uri("/users").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body, serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_get_users_returns_all() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(get_users),
+        )
+        .await;
+
+        let bloc_id = format!("bloc_{}", mongodb::bson::oid::ObjectId::new().to_hex());
+        let zone_id = format!("zone_{}", mongodb::bson::oid::ObjectId::new().to_hex());
+        let individual_id = format!(
+            "individual_{}",
+            mongodb::bson::oid::ObjectId::new().to_hex()
+        );
+        let unit_id = format!("unit_{}", mongodb::bson::oid::ObjectId::new().to_hex());
+
+        for (id, user_type) in [
+            (&bloc_id, "bloc"),
+            (&zone_id, "zone"),
+            (&individual_id, "individual"),
+            (&unit_id, "unit"),
+        ] {
+            let req = test::TestRequest::post()
+                .uri("/users")
+                .set_json(serde_json::json!({ "id": id, "userType": user_type }))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+        }
+
+        let req = test::TestRequest::get().uri("/users").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+
+        let users: serde_json::Value = test::read_body_json(resp).await;
+        let user_array = users.as_array().expect("users response should be an array");
+
+        let returned_ids: std::collections::HashSet<String> = user_array
+            .iter()
+            .filter_map(|user| {
+                user.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+            })
+            .collect();
+
+        assert!(returned_ids.contains(&bloc_id));
+        assert!(returned_ids.contains(&zone_id));
+        assert!(returned_ids.contains(&individual_id));
+        assert!(returned_ids.contains(&unit_id));
+    }
+
+    #[actix_web::test]
+    async fn test_create_user_bloc() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_user)).await;
+        let req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "test_bloc_user", "userType": "bloc"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["id"], "test_bloc_user");
+        assert_eq!(body["userType"], "bloc");
+        assert_eq!(body["resources"], serde_json::json!({}));
+        assert_eq!(body["credit"]["total"], 0.0);
+        assert_eq!(body["credit"]["last_day_average"], 0.0);
+        assert_eq!(body["credit"]["subscriptions"], serde_json::json!([]));
+        assert_eq!(body["credit"]["history"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_create_user_zone() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_user)).await;
+        let req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "test_zone_user", "userType": "zone"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["id"], "test_zone_user");
+        assert_eq!(body["userType"], "zone");
+        assert_eq!(body["resources"], serde_json::json!({}));
+        assert_eq!(body["credit"]["total"], 0.0);
+        assert_eq!(body["credit"]["last_day_average"], 0.0);
+        assert_eq!(body["credit"]["subscriptions"], serde_json::json!([]));
+        assert_eq!(body["credit"]["history"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_create_user_individual() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_user)).await;
+        let req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "test_individual_user", "userType": "individual"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["id"], "test_individual_user");
+        assert_eq!(body["userType"], "individual");
+        assert_eq!(body["credit"]["total"], 0.0);
+        assert_eq!(body["credit"]["last_day_average"], 0.0);
+        assert_eq!(body["credit"]["subscriptions"], serde_json::json!([]));
+        assert_eq!(body["credit"]["history"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_create_user_unit() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_user)).await;
+        let req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "test_unit_user", "userType": "unit"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["id"], "test_unit_user");
+        assert_eq!(body["userType"], "unit");
+        assert_eq!(body["credit"]["total"], 0.0);
+        assert_eq!(body["credit"]["last_day_average"], 0.0);
+        assert_eq!(body["credit"]["subscriptions"], serde_json::json!([]));
+        assert_eq!(body["credit"]["history"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_create_user_unknown_type_returns_bad_request() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_user)).await;
+        let req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "bad_user", "userType": "unknownType"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_update_user_not_found() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(update_user)).await;
+        let req = test::TestRequest::patch()
+            .uri("/users/no_such_user_xyz")
+            .set_json(serde_json::json!({"creditType": "money", "lastDayAverage": 10.0}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn test_update_non_unit_user_returns_method_not_allowed() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(update_user),
+        )
+        .await;
+
+        // Create a bloc user first
+        let create_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "patch_bloc_user", "userType": "bloc"}))
+            .to_request();
+        test::call_service(&app, create_req).await;
+
+        let patch_req = test::TestRequest::patch()
+            .uri("/users/patch_bloc_user")
+            .set_json(serde_json::json!({"creditType": "money", "lastDayAverage": 10.0}))
+            .to_request();
+        let resp = test::call_service(&app, patch_req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::METHOD_NOT_ALLOWED
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_update_unit_user_credit_type_not_money_returns_not_found() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(update_user),
+        )
+        .await;
+
+        let create_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "patch_unit_user_bad_credit", "userType": "unit"}))
+            .to_request();
+        test::call_service(&app, create_req).await;
+
+        let patch_req = test::TestRequest::patch()
+            .uri("/users/patch_unit_user_bad_credit")
+            .set_json(serde_json::json!({"creditType": "unknown", "lastDayAverage": 10.0}))
+            .to_request();
+        let resp = test::call_service(&app, patch_req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn test_update_unit_user_returns_ok() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(update_user),
+        )
+        .await;
+
+        let create_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "patch_unit_user", "userType": "unit"}))
+            .to_request();
+        test::call_service(&app, create_req).await;
+
+        let patch_req = test::TestRequest::patch()
+            .uri("/users/patch_unit_user")
+            .set_json(serde_json::json!({"creditType": "money", "lastDayAverage": 42.0}))
+            .to_request();
+        let resp = test::call_service(&app, patch_req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+    }
+
+    // ── Credits ───────────────────────────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_get_credit_invalid_id_returns_bad_request() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(get_credit)).await;
+        let req = test::TestRequest::get()
+            .uri("/credits/not_an_object_id")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_get_credit_not_found() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(get_credit)).await;
+        let req = test::TestRequest::get()
+            .uri("/credits/000000000000000000000001")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn test_create_credit_no_subscriptions() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_credit)).await;
+        let req = test::TestRequest::post()
+            .uri("/credits")
+            .set_json(serde_json::json!({
+                "total": 100.0,
+                "lastDayAverage": 50.0,
+                "subscriptionIds": [],
+                "history": [10.0, 20.0]
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+    }
+
+    #[actix_web::test]
+    async fn test_create_credit_invalid_subscription_id_returns_bad_request() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_credit)).await;
+        let req = test::TestRequest::post()
+            .uri("/credits")
+            .set_json(serde_json::json!({
+                "total": 100.0,
+                "lastDayAverage": 50.0,
+                "subscriptionIds": ["not_a_valid_object_id"],
+                "history": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_create_credit_nonexistent_subscription_returns_not_found() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_credit)).await;
+        let req = test::TestRequest::post()
+            .uri("/credits")
+            .set_json(serde_json::json!({
+                "total": 100.0,
+                "lastDayAverage": 50.0,
+                "subscriptionIds": ["000000000000000000000001"],
+                "history": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    // ── Subscriptions ─────────────────────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_get_subscription_invalid_id_returns_bad_request() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(get_subscription)).await;
+        let req = test::TestRequest::get()
+            .uri("/subscriptions/not_an_object_id")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_get_subscription_not_found() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(get_subscription)).await;
+        let req = test::TestRequest::get()
+            .uri("/subscriptions/000000000000000000000001")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn test_create_subscription_returns_created() {
+        let client = test_client().await;
+        let app =
+            test::init_service(App::new().app_data(client).service(create_subscription)).await;
+        let req = test::TestRequest::post()
+            .uri("/subscriptions")
+            .set_json(serde_json::json!({
+                "receiver": 42,
+                "value": 10.5,
+                "subscriptionType": "sr",
+                "priority": 1
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+    }
+
+    #[actix_web::test]
+    async fn test_create_and_get_subscription() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_subscription)
+                .service(get_subscription),
+        )
+        .await;
+
+        // Create
+        let create_req = test::TestRequest::post()
+            .uri("/subscriptions")
+            .set_json(serde_json::json!({
+                "receiver": 99,
+                "value": 5.0,
+                "subscriptionType": "contract",
+                "priority": 2
+            }))
+            .to_request();
+        let create_resp = test::call_service(&app, create_req).await;
+        assert_eq!(create_resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let body: serde_json::Value = test::read_body_json(create_resp).await;
+        let id = body["id"].as_str().expect("id missing in response");
+
+        // Get by returned id
+        let get_req = test::TestRequest::get()
+            .uri(&format!("/subscriptions/{id}"))
+            .to_request();
+        let get_resp = test::call_service(&app, get_req).await;
+        assert_eq!(get_resp.status(), actix_web::http::StatusCode::OK);
+    }
+}
