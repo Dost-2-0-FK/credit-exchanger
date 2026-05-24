@@ -6,7 +6,7 @@ use crate::domain::{
 };
 
 #[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "userType")]
 pub(crate) enum User {
     #[serde(rename = "bloc", alias = "Bloc")]
     Bloc(BaseUser<BlocUser>),

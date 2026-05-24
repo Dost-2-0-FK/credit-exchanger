@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::credit::Credit;
 
 #[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateCreditRequest {
     total: f32,
     last_day_average: f32,
@@ -30,6 +30,7 @@ impl CreateCreditRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GetCreditResponse {
     id: String,
     total: f32,

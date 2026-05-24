@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::domain::subscription::{Subscription, SubscriptionType};
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateSubscriptionRequest {
     receiver: u32,
     value: f32,
@@ -30,6 +30,7 @@ impl CreateSubscriptionRequest {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GetSubscriptionResponse {
     id: String,
     receiver: u32,
