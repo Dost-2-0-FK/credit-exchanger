@@ -19,6 +19,7 @@ impl MongoClient {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn database_name(&self) -> &str {
         &self.database_name
     }
@@ -75,6 +76,20 @@ impl MongoClient {
         let coll = db.collection::<mongodb::bson::Document>(collection);
         let filter = mongodb::bson::doc! { field: value.into() };
         coll.update_one(filter, update, None).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn replace_document_by_field(
+        &self,
+        collection: &str,
+        field: &str,
+        value: impl Into<Bson>,
+        document: mongodb::bson::Document,
+    ) -> Result<()> {
+        let db = self.client.database(&self.database_name);
+        let coll = db.collection::<mongodb::bson::Document>(collection);
+        let filter = mongodb::bson::doc! { field: value.into() };
+        coll.replace_one(filter, document, None).await?;
         Ok(())
     }
 

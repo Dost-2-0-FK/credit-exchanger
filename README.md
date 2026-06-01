@@ -16,6 +16,11 @@ NOTE (on naming): Currently, `credit` refers to the object holding either "money
 ## Installation 
 ...
 ...
+environment variables
+- DB_URI, defaults to "mongodb://localhost:27017"
+- DB_DATABASE, defaults to "credit_exchanger"
+- BLACKOUT_CONTROLLER_URL, defaults to "http://BLACKOUT-SERVICE"
+- AI_WO_A_CONTROLLER_URL, defaults to "http://AI-WO-A-SERVICE"
 
 ## Testing
 
@@ -204,4 +209,9 @@ request body is
 returns full subscription object including id
 
 - `DELETE /api/users/{user_id}/subscriptions/{subscription_id}`: returns 404 if user not found, returns success if subscription not found or successfully deleted
+
+#### Evaluations
+- `POST /api/evaluations/hourly`: evaluates non-unit users' money credit subscriptions, books successful outgoing transfers, appends hourly income to history, notifies the Blackout controller when an individual hits zero, and notifies the AI-WO-A controller when an `sr` subscription cannot be covered.
+
+- `POST /api/evaluations/daily`: recalculates `last_day_average` from each non-unit user's credit history and clears that history afterwards.
 

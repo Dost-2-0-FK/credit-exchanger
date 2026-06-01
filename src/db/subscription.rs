@@ -9,15 +9,21 @@ use crate::{
 
 use crate::db::error::Result;
 
+fn default_credit_type() -> String {
+    "money".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Constructor)]
 pub(crate) struct Subscription {
     #[serde(rename = "_id")]
     id: ObjectId,
-    receiver: u32, // the receivers unique id
+    receiver: String,
     value: f32,    // value in percentage, might be positive or negative
     subscription_type: SubscriptionType,
     // TODO check if priority is always positive int
     priority: u32,
+    #[serde(default = "default_credit_type")]
+    credit_type: String,
 }
 
 #[derive(Constructor)]
@@ -49,6 +55,7 @@ impl SubscriptionsRepository {
             db_subscription.value,
             db_subscription.subscription_type,
             db_subscription.priority,
+            db_subscription.credit_type,
         );
         Ok(Some(subscription))
     }
@@ -60,10 +67,11 @@ impl SubscriptionsRepository {
         // Persist the domain ID as MongoDB `_id`.
         let db_subscription = Subscription::new(
             ObjectId::parse_str(subscription.id())?,
-            subscription.receiver(),
+            subscription.receiver().to_string(),
             subscription.value(),
             subscription.subscription_type(),
             subscription.priority(),
+            subscription.credit_type().to_string(),
         );
 
         // Convert to MongoDB document and insert

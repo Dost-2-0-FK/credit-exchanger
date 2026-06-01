@@ -2,7 +2,7 @@ use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
 use strum::EnumString;
 
-#[derive(Debug, Serialize, Deserialize, EnumString, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, EnumString, Clone, Copy, PartialEq)]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "camelCase")]
 pub(crate) enum SubscriptionType {
@@ -10,14 +10,20 @@ pub(crate) enum SubscriptionType {
     Contract,
 }
 
+fn default_credit_type() -> String {
+    "money".to_string()
+}
+
 #[derive(Serialize, Deserialize, Constructor, Clone)]
 pub(crate) struct Subscription {
     id: String,
-    receiver: u32, // the receivers unique id
+    receiver: String,
     value: f32,    // value in percentage, might be positive or negative
     subscription_type: SubscriptionType,
     // TODO check if priority is always positive int
     priority: u32,
+    #[serde(default = "default_credit_type")]
+    credit_type: String,
 }
 
 impl Subscription {
@@ -25,8 +31,8 @@ impl Subscription {
         &self.id
     }
 
-    pub(crate) fn receiver(&self) -> u32 {
-        self.receiver
+    pub(crate) fn receiver(&self) -> &str {
+        &self.receiver
     }
 
     pub(crate) fn value(&self) -> f32 {
@@ -41,6 +47,11 @@ impl Subscription {
         self.priority
     }
 
+    pub(crate) fn credit_type(&self) -> &str {
+        &self.credit_type
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn calc(&self, last_day_average: f32) -> f32 {
         last_day_average * self.value / 100.0
     }

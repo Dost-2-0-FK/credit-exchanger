@@ -12,8 +12,13 @@ env_logger = "0.11.8"
 futures-util = "0.3.32"
 log = "0.4.29"
 mongodb = "2.0"
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.149"
 strum = { version = "0.28.0", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "full"] }
 toml = "0.9.10"
+
+[dev-dependencies]
+mockito = "1.7.0"
+serial_test = "3.2.0"

@@ -64,3 +64,32 @@ impl GetCreditResponse {
         }
     }
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreditBalanceResponse {
+    pub credit_type: String,
+    pub balance: f32,
+    pub hourly: f32, // most recent hourly income from history
+}
+
+impl CreditBalanceResponse {
+    pub(crate) fn from_credit(credit_type: String, credit: &Credit) -> Self {
+        let hourly = credit
+            .history()
+            .last()
+            .copied()
+            .unwrap_or(0.0);
+        Self {
+            credit_type,
+            balance: credit.total(),
+            hourly,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ListCreditsResponse {
+    pub credits: Vec<CreditBalanceResponse>,
+}

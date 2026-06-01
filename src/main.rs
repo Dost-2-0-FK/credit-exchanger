@@ -25,17 +25,15 @@ async fn main() -> std::io::Result<()> {
         std::io::Error::other(e)
     })?;
 
-    let uri = "mongodb://localhost:27017";
-    let database = "test_db";
+    let uri = std::env::var("DB_URI")
+        .unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
+    let database = std::env::var("DB_DATABASE")
+        .unwrap_or_else(|_| "credit_exchanger".to_string());
 
-    // Initialize MongoDB client
-    let client = MongoClient::new(uri, database)
+    // Initialize DB client
+    let client = MongoClient::new(&uri, &database)
         .await
         .expect("Failed to initialize MongoDB client");
-
-    // // Example: Insert a document
-    // let document = doc! { "name": "John Doe", "age": 30 };
-    // client.insert_document("users", document).await.expect("Failed to insert document");
 
     HttpServer::new(move || {
         let logger = Logger::default();

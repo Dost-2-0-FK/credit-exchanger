@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use derive_more::Constructor;
 use mongodb::bson::oid::ObjectId;
@@ -10,7 +10,7 @@ use crate::{
         base_user::BaseUser, bloc_user::BlocUser, error::Result, individual_user::IndividualUser,
         mongo_client::MongoClient, unit_user::UnitUser, zone_user::ZoneUser,
     },
-    domain,
+    domain::{self, subscription::Subscription},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -82,6 +82,163 @@ impl User {
     pub(crate) fn is_unit(&self) -> bool {
         matches!(self, Self::Unit(_))
     }
+
+    pub(crate) fn is_individual(&self) -> bool {
+        matches!(self, Self::Individual(_))
+    }
+
+    pub(crate) fn id(&self) -> &str {
+        match self {
+            Self::Bloc(user) => &user.id,
+            Self::Zone(user) => &user.id,
+            Self::Individual(user) => &user.id,
+            Self::Unit(user) => &user.id,
+        }
+    }
+
+    pub(crate) fn credit_mut(&mut self) -> &mut domain::credit::Credit {
+        match self {
+            Self::Bloc(user) => &mut user.credit,
+            Self::Zone(user) => &mut user.credit,
+            Self::Individual(user) => &mut user.credit,
+            Self::Unit(user) => &mut user.credit,
+        }
+    }
+
+    pub(crate) fn credit(&self) -> &domain::credit::Credit {
+        match self {
+            Self::Bloc(user) => &user.credit,
+            Self::Zone(user) => &user.credit,
+            Self::Individual(user) => &user.credit,
+            Self::Unit(user) => &user.credit,
+        }
+    }
+
+    pub(crate) fn credit_total(&self) -> f32 {
+        match self {
+            Self::Bloc(user) => user.credit.total(),
+            Self::Zone(user) => user.credit.total(),
+            Self::Individual(user) => user.credit.total(),
+            Self::Unit(user) => user.credit.total(),
+        }
+    }
+
+    pub(crate) fn resources_mut(
+        &mut self,
+    ) -> Option<&mut HashMap<String, domain::credit::Credit>> {
+        match self {
+            Self::Bloc(user) => Some(&mut user.role.resources),
+            Self::Zone(user) => Some(&mut user.role.resources),
+            Self::Individual(_) | Self::Unit(_) => None,
+        }
+    }
+
+    pub(crate) fn resources(&self) -> Option<&HashMap<String, domain::credit::Credit>> {
+        match self {
+            Self::Bloc(user) => Some(&user.role.resources),
+            Self::Zone(user) => Some(&user.role.resources),
+            Self::Individual(_) | Self::Unit(_) => None,
+        }
+    }
+
+    pub(crate) fn credit_subscriptions(&self) -> &[std::sync::Arc<Subscription>] {
+        match self {
+            Self::Bloc(user) => user.credit.subscriptions(),
+            Self::Zone(user) => user.credit.subscriptions(),
+            Self::Individual(user) => user.credit.subscriptions(),
+            Self::Unit(user) => user.credit.subscriptions(),
+        }
+    }
+}
+
+pub(crate) struct MoneyBookingOutcome {
+    pub(crate) sender_reached_zero: bool,
+}
+
+impl UsersRepository {
+    pub(crate) async fn book_resource(
+        &self,
+        sender_id: &str,
+        receiver_id: &str,
+        resource_name: &str,
+        value: f32,
+    ) -> Result<()> {
+        if value <= 0.0 {
+            return Err(crate::db::error::Error::Validation(
+                "Booking value must be greater than zero",
+            ));
+        }
+
+        let mut sender = self
+            .get_db_user(sender_id)
+            .await?
+            .ok_or(crate::db::error::Error::NotFound("sender user"))?;
+        let mut receiver = self
+            .get_db_user(receiver_id)
+            .await?
+            .ok_or(crate::db::error::Error::NotFound("receiver user"))?;
+
+        let sender_resources = sender
+            .resources_mut()
+            .ok_or(crate::db::error::Error::Validation(
+                "Sender does not have resource credits",
+            ))?;
+        let sender_resource =
+            sender_resources
+                .get_mut(resource_name)
+                .ok_or(crate::db::error::Error::NotFound("resource credit"))?;
+
+        if sender_resource.total() < value {
+            return Err(crate::db::error::Error::Validation(
+                "Insufficient resource credit for booking",
+            ));
+        }
+        sender_resource.apply_amount(-value);
+
+        let receiver_resources =
+            receiver
+                .resources_mut()
+                .ok_or(crate::db::error::Error::Validation(
+                    "Receiver does not have resource credits",
+                ))?;
+        receiver_resources
+            .entry(resource_name.to_string())
+            .or_insert_with(|| domain::credit::Credit::new(0.0, 0.0, vec![], vec![]))
+            .apply_amount(value);
+
+        self.replace_db_user(&sender).await?;
+        self.replace_db_user(&receiver).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn add_subscription_to_user_resource_credit(
+        &self,
+        user_id: &str,
+        resource_name: &str,
+        subscription: Subscription,
+    ) -> Result<Option<ApiUser>> {
+        let Some(mut user) = self.get_db_user(user_id).await? else {
+            return Ok(None);
+        };
+
+        let resources = match user.resources_mut() {
+            Some(r) => r,
+            None => {
+                return Err(crate::db::error::Error::Validation(
+                    "User does not have resource credits",
+                ))
+            }
+        };
+
+        resources
+            .entry(resource_name.to_string())
+            .or_insert_with(|| domain::credit::Credit::new(0.0, 0.0, vec![], vec![]))
+            .add_subscription(Arc::new(subscription));
+
+        self.replace_db_user(&user).await?;
+        Ok(Some(user.into_api_user()))
+    }
 }
 
 #[derive(Constructor)]
@@ -128,11 +285,41 @@ impl UsersRepository {
             .collect()
     }
 
+    pub(crate) async fn list_db_users(&self) -> Result<Vec<User>> {
+        let user_docs = self.db.list_documents("users").await?;
+        user_docs
+            .into_iter()
+            .map(|user_doc| mongodb::bson::from_document::<User>(user_doc).map_err(Into::into))
+            .collect()
+    }
+
     pub(crate) async fn insert_user(&self, user: ApiUser) -> Result<ApiUser> {
         let db_user = User::from_api_user(ObjectId::new(), user);
         let doc = mongodb::bson::to_document(&db_user)?;
         self.db.insert_document("users", doc).await?;
         Ok(db_user.into_api_user())
+    }
+
+    pub(crate) async fn replace_db_user(&self, user: &User) -> Result<()> {
+        let doc = mongodb::bson::to_document(user)?;
+        self.db
+            .replace_document_by_field("users", "id", user.id(), doc)
+            .await
+    }
+
+    pub(crate) async fn add_subscription_to_user_credit(
+        &self,
+        user_id: &str,
+        subscription: Subscription,
+    ) -> Result<Option<ApiUser>> {
+        let Some(mut user) = self.get_db_user(user_id).await? else {
+            return Ok(None);
+        };
+
+        user.credit_mut().add_subscription(Arc::new(subscription));
+        self.replace_db_user(&user).await?;
+
+        Ok(Some(user.into_api_user()))
     }
 
     pub(crate) async fn update_unit_last_day_average(
@@ -150,5 +337,128 @@ impl UsersRepository {
             .update_document_by_field("users", "id", user_id, update)
             .await?;
         self.get_user(user_id).await
+    }
+
+    pub(crate) async fn book_money(
+        &self,
+        sender_id: &str,
+        receiver_id: &str,
+        value: f32,
+    ) -> Result<MoneyBookingOutcome> {
+        if value <= 0.0 {
+            return Err(crate::db::error::Error::Validation(
+                "Booking value must be greater than zero",
+            ));
+        }
+
+        let sender = self
+            .get_db_user(sender_id)
+            .await?
+            .ok_or(crate::db::error::Error::NotFound("sender user"))?;
+        let receiver = self
+            .get_db_user(receiver_id)
+            .await?
+            .ok_or(crate::db::error::Error::NotFound("receiver user"))?;
+
+        let sender_total = sender.credit_total();
+        if sender_total < value {
+            return Err(crate::db::error::Error::Validation(
+                "Insufficient credit for booking",
+            ));
+        }
+
+        let receiver_total = receiver.credit_total();
+        let updated_sender_total = sender_total - value;
+        let updated_receiver_total = receiver_total + value;
+
+        self.db
+            .update_document_by_field(
+                "users",
+                "id",
+                sender_id,
+                mongodb::bson::doc! {
+                    "$set": {
+                        "credit.total": updated_sender_total,
+                    }
+                },
+            )
+            .await?;
+        self.db
+            .update_document_by_field(
+                "users",
+                "id",
+                receiver_id,
+                mongodb::bson::doc! {
+                    "$set": {
+                        "credit.total": updated_receiver_total,
+                    }
+                },
+            )
+            .await?;
+
+        Ok(MoneyBookingOutcome {
+            sender_reached_zero: sender.is_individual()
+                && sender_total > 0.0
+                && updated_sender_total.abs() < f32::EPSILON,
+        })
+    }
+
+    /// Returns all subscriptions across all credits (money + resources) for a user.
+    /// Returns `None` if the user does not exist.
+    pub(crate) async fn list_user_subscriptions(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<Vec<Subscription>>> {
+        let Some(user) = self.get_db_user(user_id).await? else {
+            return Ok(None);
+        };
+
+        let mut subs: Vec<Subscription> = user
+            .credit_subscriptions()
+            .into_iter()
+            .map(|s| s.as_ref().clone())
+            .collect();
+
+        if let Some(resources) = user.resources() {
+            for credit in resources.values() {
+                for s in credit.subscriptions() {
+                    subs.push(s.as_ref().clone());
+                }
+            }
+        }
+
+        Ok(Some(subs))
+    }
+
+    /// Remove a subscription (from money credit or any resource credit) for a user.
+    /// Returns `None` if the user does not exist.
+    /// Returns `Ok(Some(false))` if the subscription was not found (spec: still success).
+    pub(crate) async fn remove_user_subscription(
+        &self,
+        user_id: &str,
+        subscription_id: &str,
+    ) -> Result<Option<bool>> {
+        let Some(mut user) = self.get_db_user(user_id).await? else {
+            return Ok(None);
+        };
+
+        let mut removed = user.credit_mut().remove_subscription(subscription_id);
+
+        if !removed {
+            if let Some(resources) = user.resources_mut() {
+                for credit in resources.values_mut() {
+                    if credit.remove_subscription(subscription_id) {
+                        removed = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if removed {
+            self.replace_db_user(&user).await?;
+        }
+
+        Ok(Some(removed))
     }
 }
