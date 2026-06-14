@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use utoipa_actix_web::{AppExt, scope};
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{config::Config, db::mongo_client::MongoClient, routes::{configure_routes, ApiDoc}};
+use crate::{config::Config, db::mongo_client::MongoClient, routes::{configure_routes}};
 
 mod app;
 mod api;
