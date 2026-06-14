@@ -447,6 +447,10 @@ async fn create_subscription(
     let repository = SubscriptionsRepository::new(client.get_ref().clone());
     let user_id = user_id.into_inner();
 
+    if body.receiver() == user_id {
+        return HttpResponse::BadRequest().body("User cannot subscribe to itself");
+    }
+
     match users_repository.get_db_user(&user_id).await {
         Ok(Some(_)) => {}
         Ok(None) => return HttpResponse::NotFound().body("User not found"),
@@ -1630,6 +1634,40 @@ mod tests {
             .uri("/users/subscription_unit_owner/subscriptions")
             .set_json(serde_json::json!({
                 "receiver": "subscription_unit_receiver",
+                "value": 12.5,
+                "subscriptionType": "sr",
+                "priority": 1
+            }))
+            .to_request();
+        let create_subscription_resp = test::call_service(&app, create_subscription_req).await;
+        assert_eq!(
+            create_subscription_resp.status(),
+            actix_web::http::StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_create_subscription_for_self_returns_bad_request() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(create_subscription),
+        )
+        .await;
+
+        let create_owner_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "subscription_self_owner", "userType": "individual"}))
+            .to_request();
+        let create_owner_resp = test::call_service(&app, create_owner_req).await;
+        assert_eq!(create_owner_resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let create_subscription_req = test::TestRequest::post()
+            .uri("/users/subscription_self_owner/subscriptions")
+            .set_json(serde_json::json!({
+                "receiver": "subscription_self_owner",
                 "value": 12.5,
                 "subscriptionType": "sr",
                 "priority": 1
