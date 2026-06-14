@@ -18,6 +18,7 @@ serde_json = "1.0.149"
 strum = { version = "0.28.0", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "full"] }
 toml = "0.9.10"
+utoipa = "5.5.0"
 
 [dev-dependencies]
 mockito = "1.7.0"
