@@ -1202,6 +1202,26 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn test_create_user_duplicate_id_returns_conflict() {
+        let client = test_client().await;
+        let app = test::init_service(App::new().app_data(client).service(create_user)).await;
+
+        let first_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "duplicate_user", "userType": "individual"}))
+            .to_request();
+        let first_resp = test::call_service(&app, first_req).await;
+        assert_eq!(first_resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let second_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "duplicate_user", "userType": "individual"}))
+            .to_request();
+        let second_resp = test::call_service(&app, second_req).await;
+        assert_eq!(second_resp.status(), actix_web::http::StatusCode::CONFLICT);
+    }
+
+    #[actix_web::test]
     async fn test_create_user_unknown_type_returns_bad_request() {
         let client = test_client().await;
         let app = test::init_service(App::new().app_data(client).service(create_user)).await;
