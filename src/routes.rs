@@ -876,7 +876,7 @@ async fn get_user_credits(
         ("credit_type" = String, Path, description = "Credit type (money or resource name)")
     ),
     responses(
-        (status = 200, description = "User credit", body = GetCreditResponse),
+        (status = 200, description = "User credit", body = CreditBalanceResponse),
         (status = 404, description = "User or credit not found")
     )
 )]
