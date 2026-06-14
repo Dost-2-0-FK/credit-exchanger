@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::domain::subscription::{Subscription, SubscriptionType};
 
@@ -71,10 +72,11 @@ impl CreditEvaluation {
     }
 }
 
-#[derive(Serialize, Deserialize, Constructor, Clone)]
+#[derive(Serialize, Deserialize, Constructor, Clone, ToSchema)]
 pub(crate) struct Credit {
     total: f32,
     last_day_average: f32,
+    #[schema(value_type = Vec<Subscription>)]
     subscriptions: Vec<Arc<Subscription>>,
     history: Vec<f32>,
 }

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::domain::subscription::{Subscription, SubscriptionType};
 
@@ -6,7 +7,7 @@ fn default_money() -> String {
     "money".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateSubscriptionRequest {
     receiver: String,
@@ -39,7 +40,7 @@ impl CreateSubscriptionRequest {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GetSubscriptionResponse {
     id: String,

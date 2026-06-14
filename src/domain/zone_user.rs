@@ -1,10 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::domain::{base_user::BaseUser, credit::Credit};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub(crate) struct ZoneUser {
     resources: HashMap<String, Credit>,
 }

@@ -1,14 +1,16 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::domain::credit::Credit;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub(crate) struct BaseUser<T> {
     #[serde(flatten)]
     role: T,
     id: String,
+    #[schema(value_type = Credit)]
     credit: Arc<Credit>,
 }
 

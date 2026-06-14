@@ -1,8 +1,11 @@
 use actix_web::{App, HttpServer, middleware::Logger, web};
 use anyhow::{Context, Result};
+use utoipa_actix_web::{AppExt, scope};
+use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{config::Config, db::mongo_client::MongoClient, routes::configure_routes};
+use crate::{config::Config, db::mongo_client::MongoClient, routes::{configure_routes, ApiDoc}};
 
+mod app;
 mod api;
 mod config;
 mod db;
@@ -40,9 +43,13 @@ async fn main() -> std::io::Result<()> {
         let mongo_client = web::Data::new(client.clone());
 
         App::new()
-            .wrap(logger)
+            .into_utoipa_app()
+            .openapi(app::openapi())
+            .map(|app| app.wrap(logger))
             .app_data(mongo_client)
-            .configure(configure_routes)
+            .service(scope::scope("/api").configure(configure_routes))
+            .openapi_service(|api| SwaggerUi::new("/swagger-ui/{_:.*}").url("/api-docs/openapi.json", api))
+            .into_app()
     })
     .bind(("127.0.0.1", 8080))?
     .run()

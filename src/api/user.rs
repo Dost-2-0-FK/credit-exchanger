@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::domain::{
     base_user::BaseUser, bloc_user::BlocUser, individual_user::IndividualUser, unit_user::UnitUser,
     zone_user::ZoneUser,
 };
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 #[serde(tag = "userType")]
 pub(crate) enum User {
     #[serde(rename = "bloc", alias = "Bloc")]
@@ -18,7 +19,7 @@ pub(crate) enum User {
     Unit(BaseUser<UnitUser>),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateUserRequest {
     id: String,
@@ -35,7 +36,7 @@ impl CreateUserRequest {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PatchUserRequest {
     credit_type: String,
@@ -52,7 +53,7 @@ impl PatchUserRequest {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum UserType {
     Bloc,

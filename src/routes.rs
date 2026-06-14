@@ -1,10 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
+use utoipa_actix_web::service_config::ServiceConfig;
 
 use actix_web::{HttpResponse, Responder, delete, get, patch, post,
     web::{self, Path},
 };
 use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
+use utoipa::{OpenApi, ToSchema};
 
 use crate::{
     api::{
@@ -19,7 +21,7 @@ use crate::{
     domain::{self, base_user::BaseUser, bloc_user::BlocUser, credit::Credit},
 };
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreditBooking {
     credit_type: String,
@@ -30,7 +32,7 @@ struct CreditBooking {
 const BLACKOUT_CONTROLLER_URL_ENV: &str = "BLACKOUT_CONTROLLER_URL";
 const AI_WO_A_CONTROLLER_URL_ENV: &str = "AI_WO_A_CONTROLLER_URL";
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct HourlyEvaluationResponse {
     evaluated_users: usize,
@@ -39,17 +41,32 @@ struct HourlyEvaluationResponse {
     sr_overflow_notifications: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct DailyEvaluationResponse {
     updated_users: usize,
 }
 
+#[utoipa::path(
+    get,
+    path = "/",
+    responses(
+        (status = 200, description = "Hello response")
+    )
+)]
 #[get("/")]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().body("Hello world!")
 }
 
+#[utoipa::path(
+    post,
+    path = "/echo",
+    request_body = String,
+    responses(
+        (status = 200, description = "Echo response", body = String)
+    )
+)]
 #[post("/echo")]
 async fn echo(req_body: String) -> impl Responder {
     HttpResponse::Ok().body(req_body)
@@ -57,6 +74,18 @@ async fn echo(req_body: String) -> impl Responder {
 
 // ### USERS
 
+#[utoipa::path(
+    get,
+    path = "/users/{user_id}",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID")
+    ),
+    responses(
+        (status = 200, description = "User found"),
+        (status = 404, description = "User not found")
+    )
+)]
 #[get("/users/{user_id}")]
 // `GET /api/users/{user_id}`
 async fn get_user(client: web::Data<MongoClient>, user_id: Path<String>) -> impl Responder {
@@ -70,6 +99,14 @@ async fn get_user(client: web::Data<MongoClient>, user_id: Path<String>) -> impl
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/users",
+    tag = "users",
+    responses(
+        (status = 200, description = "List of users")
+    )
+)]
 #[get("/users")]
 // `GET /api/users`
 async fn get_users(client: web::Data<MongoClient>) -> impl Responder {
@@ -83,6 +120,15 @@ async fn get_users(client: web::Data<MongoClient>) -> impl Responder {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/users",
+    tag = "users",
+    request_body = CreateUserRequest,
+    responses(
+        (status = 201, description = "User created")
+    )
+)]
 #[post("/users")]
 // `POST /api/users`
 async fn create_user(
@@ -91,7 +137,7 @@ async fn create_user(
 ) -> impl Responder {
     let repository = UsersRepository::new(client.get_ref().clone());
     let body = body.into_inner();
-    let user_id = body.id();
+    let user_id = body.id(); // TODO(SophiaKu): FIXME: user id is not unique right now
     let credit = Arc::new(Credit::new(0.0, 0.0, vec![], vec![]));
     let resources: HashMap<String, Credit> = HashMap::new();
 
@@ -118,6 +164,20 @@ async fn create_user(
     }
 }
 
+#[utoipa::path(
+    patch,
+    path = "/users/{user_id}",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID")
+    ),
+    request_body = PatchUserRequest,
+    responses(
+        (status = 200, description = "User updated"),
+        (status = 404, description = "User not found"),
+        (status = 405, description = "Only unit users can be updated")
+    )
+)]
 #[patch("/users/{user_id}")]
 // `PATCH /api/users/{user_id}`
 async fn update_user(
@@ -157,6 +217,19 @@ async fn update_user(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/users/{user_id}/bookings",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "Sender user ID")
+    ),
+    request_body = CreditBooking,
+    responses(
+        (status = 200, description = "Booking created"),
+        (status = 404, description = "User not found")
+    )
+)]
 #[post("/users/{user_id}/bookings")]
 async fn create_booking(
     client: web::Data<MongoClient>,
@@ -211,6 +284,19 @@ async fn create_booking(
 
 // ### CREDITS
 
+#[utoipa::path(
+    get,
+    path = "/credits/{credit_id}",
+    tag = "credits",
+    params(
+        ("credit_id" = String, Path, description = "Credit ID")
+    ),
+    responses(
+        (status = 200, description = "Credit found", body = GetCreditResponse),
+        (status = 400, description = "Invalid credit ID format"),
+        (status = 404, description = "Credit not found")
+    )
+)]
 #[get("/credits/{credit_id}")]
 // `GET /api/credits/{credit_id}`
 async fn get_credit(client: web::Data<MongoClient>, credit_id: Path<String>) -> impl Responder {
@@ -234,6 +320,16 @@ async fn get_credit(client: web::Data<MongoClient>, credit_id: Path<String>) -> 
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/credits",
+    tag = "credits",
+    request_body = CreateCreditRequest,
+    responses(
+        (status = 201, description = "Credit created", body = GetCreditResponse),
+        (status = 400, description = "Invalid subscription ID format")
+    )
+)]
 #[post("/credits")]
 // `POST /api/credits`
 async fn create_credit(
@@ -285,6 +381,19 @@ async fn create_credit(
 
 // ### SUBSCRIPTIONS
 
+#[utoipa::path(
+    get,
+    path = "/subscriptions/{subscription_id}",
+    tag = "subscriptions",
+    params(
+        ("subscription_id" = String, Path, description = "Subscription ID")
+    ),
+    responses(
+        (status = 200, description = "Subscription found", body = GetSubscriptionResponse),
+        (status = 400, description = "Invalid subscription ID format"),
+        (status = 404, description = "Subscription not found")
+    )
+)]
 #[get("/subscriptions/{subscription_id}")]
 // `GET /api/subscriptions/{subscription_id}`
 async fn get_subscription(
@@ -309,6 +418,20 @@ async fn get_subscription(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/users/{user_id}/subscriptions",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID")
+    ),
+    request_body = CreateSubscriptionRequest,
+    responses(
+        (status = 201, description = "Subscription created", body = GetSubscriptionResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "User or receiver not found")
+    )
+)]
 #[post("/users/{user_id}/subscriptions")]
 // `POST /api/users/{user_id}/subscriptions`
 async fn create_subscription(
@@ -389,6 +512,14 @@ async fn create_subscription(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/evaluations/hourly",
+    tag = "evaluations",
+    responses(
+        (status = 200, description = "Hourly evaluation completed", body = HourlyEvaluationResponse)
+    )
+)]
 #[post("/evaluations/hourly")]
 async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
     let repository = UsersRepository::new(client.get_ref().clone());
@@ -508,6 +639,14 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
     })
 }
 
+#[utoipa::path(
+    post,
+    path = "/evaluations/daily",
+    tag = "evaluations",
+    responses(
+        (status = 200, description = "Daily evaluation completed", body = DailyEvaluationResponse)
+    )
+)]
 #[post("/evaluations/daily")]
 async fn evaluate_daily(client: web::Data<MongoClient>) -> impl Responder {
     let repository = UsersRepository::new(client.get_ref().clone());
@@ -578,12 +717,24 @@ async fn notify_ai_wo_a_controller(user_id: &str, overflow: f32) -> Result<(), r
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct ListSubscriptionsResponse {
     subscriptions: Vec<GetSubscriptionResponse>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/users/{user_id}/subscriptions",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID")
+    ),
+    responses(
+        (status = 200, description = "User subscriptions", body = ListSubscriptionsResponse),
+        (status = 404, description = "User not found")
+    )
+)]
 #[get("/users/{user_id}/subscriptions")]
 // `GET /api/users/{user_id}/subscriptions`
 async fn list_user_subscriptions(
@@ -603,6 +754,19 @@ async fn list_user_subscriptions(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/users/{user_id}/subscriptions/{subscription_id}",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID"),
+        ("subscription_id" = String, Path, description = "Subscription ID")
+    ),
+    responses(
+        (status = 200, description = "Subscription found", body = GetSubscriptionResponse),
+        (status = 404, description = "User or subscription not found")
+    )
+)]
 #[get("/users/{user_id}/subscriptions/{subscription_id}")]
 // `GET /api/users/{user_id}/subscriptions/{subscription_id}`
 async fn get_user_subscription(
@@ -625,6 +789,19 @@ async fn get_user_subscription(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/users/{user_id}/subscriptions/{subscription_id}",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID"),
+        ("subscription_id" = String, Path, description = "Subscription ID")
+    ),
+    responses(
+        (status = 200, description = "Subscription deleted"),
+        (status = 404, description = "User not found")
+    )
+)]
 #[delete("/users/{user_id}/subscriptions/{subscription_id}")]
 // `DELETE /api/users/{user_id}/subscriptions/{subscription_id}`
 async fn delete_user_subscription(
@@ -645,6 +822,18 @@ async fn delete_user_subscription(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/users/{user_id}/credits",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID")
+    ),
+    responses(
+        (status = 200, description = "User credits", body = ListCreditsResponse),
+        (status = 404, description = "User not found")
+    )
+)]
 #[get("/users/{user_id}/credits")]
 // `GET /api/users/{user_id}/credits`
 async fn get_user_credits(
@@ -674,6 +863,19 @@ async fn get_user_credits(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/users/{user_id}/credits/{credit_type}",
+    tag = "users",
+    params(
+        ("user_id" = String, Path, description = "User ID"),
+        ("credit_type" = String, Path, description = "Credit type (money or resource name)")
+    ),
+    responses(
+        (status = 200, description = "User credit", body = GetCreditResponse),
+        (status = 404, description = "User or credit not found")
+    )
+)]
 #[get("/users/{user_id}/credits/{credit_type}")]
 // `GET /api/users/{user_id}/credits/{credit_type}`
 async fn get_user_credit_by_type(
@@ -705,7 +907,7 @@ async fn get_user_credit_by_type(
     }
 }
 
-pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+pub(crate) fn configure_routes(cfg: &mut ServiceConfig<'_>) {
     cfg.service(hello)
         .service(echo)
         .service(get_user)
@@ -725,6 +927,53 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         .service(delete_user_subscription)
         .service(create_subscription);
 }
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        hello,
+        echo,
+        get_user,
+        get_users,
+        create_user,
+        create_booking,
+        update_user,
+        evaluate_hourly,
+        evaluate_daily,
+        get_credit,
+        create_credit,
+        get_user_credits,
+        get_user_credit_by_type,
+        get_subscription,
+        list_user_subscriptions,
+        get_user_subscription,
+        delete_user_subscription,
+        create_subscription,
+    ),
+    components(
+        schemas(
+            CreateUserRequest,
+            PatchUserRequest,
+            UserType,
+            GetCreditResponse,
+            CreateCreditRequest,
+            ListCreditsResponse,
+            GetSubscriptionResponse,
+            CreateSubscriptionRequest,
+            CreditBooking,
+            HourlyEvaluationResponse,
+            DailyEvaluationResponse,
+            ListSubscriptionsResponse,
+        )
+    ),
+    info(
+        title = "Credit Exchanger API",
+        version = "1.0.0",
+        description = "Credit and subscription management system"
+    )
+)]
+pub struct ApiDoc;
+
 
 #[cfg(test)]
 mod tests {

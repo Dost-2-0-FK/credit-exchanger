@@ -1,8 +1,9 @@
 use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
 use strum::EnumString;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize, Deserialize, EnumString, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, EnumString, Clone, Copy, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "camelCase")]
 pub(crate) enum SubscriptionType {
@@ -14,7 +15,7 @@ fn default_credit_type() -> String {
     "money".to_string()
 }
 
-#[derive(Serialize, Deserialize, Constructor, Clone)]
+#[derive(Serialize, Deserialize, Constructor, Clone, ToSchema)]
 pub(crate) struct Subscription {
     id: String,
     receiver: String,
