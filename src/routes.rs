@@ -126,7 +126,8 @@ async fn get_users(client: web::Data<MongoClient>) -> impl Responder {
     tag = "users",
     request_body = CreateUserRequest,
     responses(
-        (status = 201, description = "User created")
+        (status = 201, description = "User created"),
+        (status = 409, description = "User already exists")
     )
 )]
 #[post("/users")]
@@ -137,7 +138,7 @@ async fn create_user(
 ) -> impl Responder {
     let repository = UsersRepository::new(client.get_ref().clone());
     let body = body.into_inner();
-    let user_id = body.id(); // TODO(SophiaKu): FIXME: user id is not unique right now
+    let user_id = body.id();
     let credit = Arc::new(Credit::new(0.0, 0.0, vec![], vec![]));
     let resources: HashMap<String, Credit> = HashMap::new();
 
@@ -158,6 +159,9 @@ async fn create_user(
 
     match repository.insert_user(user).await {
         Ok(user) => HttpResponse::Created().json(user),
+        Err(crate::db::error::Error::Validation(message)) => {
+            HttpResponse::Conflict().body(message)
+        }
         Err(err) => {
             HttpResponse::InternalServerError().body(format!("Failed to create user: {err}"))
         }

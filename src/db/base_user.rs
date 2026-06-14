@@ -1,4 +1,4 @@
-use mongodb::bson::oid::ObjectId;
+use mongodb::bson::Bson;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::credit::Credit;
@@ -6,7 +6,7 @@ use crate::domain::credit::Credit;
 #[derive(Serialize, Deserialize)]
 pub(crate) struct BaseUser<T> {
     #[serde(rename = "_id")]
-    pub(crate) db_id: ObjectId,
+    pub(crate) db_id: Bson,
     pub(crate) id: String,
     #[serde(flatten)]
     pub(crate) role: T,
@@ -14,9 +14,9 @@ pub(crate) struct BaseUser<T> {
 }
 
 impl<T> BaseUser<T> {
-    pub(crate) fn new(db_id: ObjectId, id: String, role: T, credit: Credit) -> Self {
+    pub(crate) fn new(db_id: impl Into<Bson>, id: String, role: T, credit: Credit) -> Self {
         Self {
-            db_id,
+            db_id: db_id.into(),
             id,
             role,
             credit,

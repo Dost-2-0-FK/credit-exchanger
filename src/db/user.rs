@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use derive_more::Constructor;
-use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -23,7 +22,7 @@ pub(crate) enum User {
 }
 
 impl User {
-    pub(crate) fn from_api_user(db_id: ObjectId, user: ApiUser) -> Self {
+    pub(crate) fn from_api_user(db_id: String, user: ApiUser) -> Self {
         match user {
             ApiUser::Bloc(user) => Self::Bloc(BaseUser::new(
                 db_id,
@@ -250,7 +249,7 @@ impl UsersRepository {
     pub(crate) async fn get_user(&self, user_id: &str) -> Result<Option<ApiUser>> {
         let user_doc = self
             .db
-            .get_document_by_field("users", "id", user_id)
+            .get_document_by_field("users", "_id", user_id)
             .await?;
         let Some(user_doc) = user_doc else {
             return Ok(None);
@@ -263,7 +262,7 @@ impl UsersRepository {
     pub(crate) async fn get_db_user(&self, user_id: &str) -> Result<Option<User>> {
         let user_doc = self
             .db
-            .get_document_by_field("users", "id", user_id)
+            .get_document_by_field("users", "_id", user_id)
             .await?;
         let Some(user_doc) = user_doc else {
             return Ok(None);
@@ -294,16 +293,23 @@ impl UsersRepository {
     }
 
     pub(crate) async fn insert_user(&self, user: ApiUser) -> Result<ApiUser> {
-        let db_user = User::from_api_user(ObjectId::new(), user);
+        let db_user = User::from_api_user(user.id().to_string(), user);
         let doc = mongodb::bson::to_document(&db_user)?;
-        self.db.insert_document("users", doc).await?;
+        match self.db.insert_document("users", doc).await {
+            Ok(()) => {}
+            Err(crate::db::error::Error::DbError(err)) if err.to_string().contains("E11000") => {
+                return Err(crate::db::error::Error::Validation("User already exists"));
+            }
+            Err(err) => return Err(err),
+        }
+
         Ok(db_user.into_api_user())
     }
 
     pub(crate) async fn replace_db_user(&self, user: &User) -> Result<()> {
         let doc = mongodb::bson::to_document(user)?;
         self.db
-            .replace_document_by_field("users", "id", user.id(), doc)
+            .replace_document_by_field("users", "_id", user.id(), doc)
             .await
     }
 
@@ -334,7 +340,7 @@ impl UsersRepository {
         };
 
         self.db
-            .update_document_by_field("users", "id", user_id, update)
+            .update_document_by_field("users", "_id", user_id, update)
             .await?;
         self.get_user(user_id).await
     }
@@ -374,7 +380,7 @@ impl UsersRepository {
         self.db
             .update_document_by_field(
                 "users",
-                "id",
+                "_id",
                 sender_id,
                 mongodb::bson::doc! {
                     "$set": {
@@ -386,7 +392,7 @@ impl UsersRepository {
         self.db
             .update_document_by_field(
                 "users",
-                "id",
+                "_id",
                 receiver_id,
                 mongodb::bson::doc! {
                     "$set": {

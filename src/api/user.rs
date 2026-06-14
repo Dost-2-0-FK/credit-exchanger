@@ -19,6 +19,17 @@ pub(crate) enum User {
     Unit(BaseUser<UnitUser>),
 }
 
+impl User {
+    pub(crate) fn id(&self) -> &str {
+        match self {
+            Self::Bloc(user) => user.id(),
+            Self::Zone(user) => user.id(),
+            Self::Individual(user) => user.id(),
+            Self::Unit(user) => user.id(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct CreateUserRequest {
