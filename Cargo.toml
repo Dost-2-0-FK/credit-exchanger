@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["fs", "full"] }
 toml = "0.9.10"
 utoipa = "5.5.0"
 utoipa-actix-web = "0.1.2"
+utoipa-swagger-ui = "9.0.2"
 
 [dev-dependencies]
 mockito = "1.7.0"
