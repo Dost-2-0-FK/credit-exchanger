@@ -1,0 +1,166 @@
+{
+    "blocs": [
+        {
+            "id": "user-1",
+            "credit": {
+                "total": 5.5,
+                "last_day_average": 3.7,
+                "subscriptions": [
+                    {
+                        "receiver": "user-2",
+                        "value": 2,
+                        "subscription_type": "sr",
+                        "priority": 1,
+                        "credit_type": "money"
+                    }
+                ]
+            },
+            "resources": {
+                "resource-type-1": {
+                    "total": 5.5,
+                    "last_day_average": 3.7,
+                    "subscriptions": [
+                        {
+                            "receiver": "user-2",
+                            "value": 7,
+                            "subscription_type": "contract",
+                            "priority": 2,
+                            "credit_type": "resource-type-1"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "user-3",
+            "credit": {
+                "total": 12,
+                "last_day_average": 4.2,
+                "subscriptions": [
+                    {
+                        "receiver": "user-4",
+                        "value": 5,
+                        "subscription_type": "contract",
+                        "priority": 3,
+                        "credit_type": "money"
+                    }
+                ]
+            },
+            "resources": {
+                "resource-type-2": {
+                    "total": 9,
+                    "last_day_average": 2.5,
+                    "subscriptions": [
+                        {
+                            "receiver": "user-4",
+                            "value": 3,
+                            "subscription_type": "sr",
+                            "priority": 1,
+                            "credit_type": "resource-type-2"
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "zones": [
+        {
+            "id": "user-5",
+            "credit": {
+                "total": 20,
+                "last_day_average": 6,
+                "subscriptions": [
+                    {
+                        "receiver": "user-2",
+                        "value": 10,
+                        "subscription_type": "sr",
+                        "priority": 2,
+                        "credit_type": "money"
+                    }
+                ]
+            },
+            "resources": {
+                "resource-type-3": {
+                    "total": 15,
+                    "last_day_average": 5,
+                    "subscriptions": [
+                        {
+                            "receiver": "user-6",
+                            "value": 8,
+                            "subscription_type": "contract",
+                            "priority": 4,
+                            "credit_type": "resource-type-3"
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "id": "user-7",
+            "credit": {
+                "total": 11,
+                "last_day_average": 3.3,
+                "subscriptions": [
+                    {
+                        "receiver": "user-8",
+                        "value": 6,
+                        "subscription_type": "contract",
+                        "priority": 1,
+                        "credit_type": "money"
+                    }
+                ]
+            },
+            "resources": {
+                "resource-type-4": {
+                    "total": 7,
+                    "last_day_average": 1.5,
+                    "subscriptions": [
+                        {
+                            "receiver": "user-6",
+                            "value": 4,
+                            "subscription_type": "sr",
+                            "priority": 2,
+                            "credit_type": "resource-type-4"
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "individuals": [
+        {
+            "id": "user-2",
+            "credit": {
+                "total": 3,
+                "last_day_average": 1.2,
+                "subscriptions": []
+            }
+        },
+        {
+            "id": "user-4",
+            "credit": {
+                "total": 6,
+                "last_day_average": 2.1,
+                "subscriptions": []
+            }
+        }
+    ],
+    "units": [
+        {
+            "id": "user-6",
+            "credit": {
+                "total": 0,
+                "last_day_average": 0,
+                "subscriptions": []
+            }
+        },
+        {
+            "id": "user-8",
+            "credit": {
+                "total": 0,
+                "last_day_average": 0,
+                "subscriptions": []
+            }
+        }
+    ]
+}
