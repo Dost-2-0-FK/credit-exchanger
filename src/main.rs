@@ -2,8 +2,9 @@ use actix_web::{App, HttpServer, middleware::Logger, web};
 use anyhow::{Context, Result};
 use utoipa_actix_web::{AppExt, scope};
 use utoipa_swagger_ui::SwaggerUi;
+use std::{time::Duration};
 
-use crate::{config::Config, db::mongo_client::MongoClient, routes::{configure_routes}};
+use crate::{config::Config, db::mongo_client::MongoClient, routes::configure_routes, scheduling::recurring_tasks};
 
 mod app;
 mod api;
@@ -11,6 +12,7 @@ mod config;
 mod db;
 mod domain;
 mod routes;
+mod scheduling;
 
 async fn setup() -> Result<()> {
     env_logger::init();
@@ -37,6 +39,9 @@ async fn main() -> std::io::Result<()> {
     let client = MongoClient::new(&uri, &database)
         .await
         .expect("Failed to initialize MongoDB client");
+
+    // tokio::spawn(recurring_tasks(client.clone(), Duration::from_hours(1)));
+    tokio::spawn(recurring_tasks(client.clone(), Duration::from_mins(1)));
 
     HttpServer::new(move || {
         let logger = Logger::default();
