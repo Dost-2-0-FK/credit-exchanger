@@ -22,6 +22,47 @@ environment variables
 - BLACKOUT_CONTROLLER_URL, defaults to "http://BLACKOUT-SERVICE"
 - AI_WO_A_CONTROLLER_URL, defaults to "http://AI-WO-A-SERVICE"
 
+## Local Execution
+
+1. Start MongoDB
+
+```bash
+docker run --name credit-exchanger-mongo -p 27017:27017 -d mongo:7
+```
+
+If you already created the container before:
+
+```bash
+docker start credit-exchanger-mongo
+```
+
+2. Seed the database (optional but recommended)
+
+```bash
+DB_URI="mongodb://localhost:27017" DB_DATABASE="credit_exchanger" bash scripts/seed-db.sh
+```
+
+3. Run the service
+
+```bash
+DB_URI="mongodb://localhost:27017" \
+DB_DATABASE="credit_exchanger" \
+BLACKOUT_CONTROLLER_URL="http://BLACKOUT-SERVICE" \
+AI_WO_A_CONTROLLER_URL="http://AI-WO-A-SERVICE" \
+cargo run
+```
+
+4. Verify it is up
+
+```bash
+curl -s "http://127.0.0.1:8080/api/users" | jq
+```
+
+Notes:
+- Swagger UI: `http://127.0.0.1:8080/swagger-ui/`
+- To reset and reseed from scratch: `SEED_DROP_DATABASE=true bash scripts/seed-db.sh`.
+
+
 ## Database Seeding
 
 The project includes `scripts/seed-db.sh` to seed MongoDB from a JSON file.
