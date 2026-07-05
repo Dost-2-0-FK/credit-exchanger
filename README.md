@@ -22,6 +22,32 @@ environment variables
 - BLACKOUT_CONTROLLER_URL, defaults to "http://BLACKOUT-SERVICE"
 - AI_WO_A_CONTROLLER_URL, defaults to "http://AI-WO-A-SERVICE"
 
+## Database Seeding
+
+The project includes `scripts/seed-db.sh` to seed MongoDB from a JSON file.
+
+Default seed file that can be used for local testing:
+- `src/db-seeding-example.json`
+
+Run seeding for default file:
+
+```bash
+DB_URI="mongodb://localhost:27017" DB_DATABASE="credit_exchanger" bash scripts/seed-db.sh
+```
+
+Run with a custom seed file:
+
+```bash
+DB_URI="mongodb://localhost:27017" DB_DATABASE="credit_exchanger"
+bash scripts/seed-db.sh path/to/seed.json
+```
+
+Optional: clear the whole database before seeding (destructive):
+
+```bash
+SEED_DROP_DATABASE=true bash scripts/seed-db.sh
+```
+
 ## Testing
 
 ### Run tests locally (ephemeral MongoDB)
