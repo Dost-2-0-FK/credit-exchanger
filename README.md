@@ -22,7 +22,37 @@ environment variables
 - BLACKOUT_CONTROLLER_URL, defaults to "http://BLACKOUT-SERVICE"
 - AI_WO_A_CONTROLLER_URL, defaults to "http://AI-WO-A-SERVICE"
 
-## Local Execution
+## Download and Execute the Crate
+
+You can install the binary directly from this repository and run it locally.
+
+1. Install the crate binary
+
+```bash
+cargo install --git https://github.com/Dost-2-0-FK/credit-exchanger credit-exchanger
+```
+
+2. Run the installed executable
+
+```bash
+DB_URI="mongodb://localhost:27017" \
+DB_DATABASE="credit_exchanger" \
+BLACKOUT_CONTROLLER_URL="http://BLACKOUT-SERVICE" \
+AI_WO_A_CONTROLLER_URL="http://AI-WO-A-SERVICE" \
+credit-exchanger
+```
+
+3. Verify it is up
+
+```bash
+curl -s "http://127.0.0.1:8080/api/users" | jq
+```
+
+Notes:
+- Make sure MongoDB is running before starting the service.
+- The binary starts the API on `127.0.0.1:8080`.
+
+## Local Execution from Source Code
 
 1. Start MongoDB
 
@@ -36,7 +66,7 @@ If you already created the container before:
 docker start credit-exchanger-mongo
 ```
 
-2. Seed the database (optional but recommended)
+2. Seed the database (optional)
 
 ```bash
 DB_URI="mongodb://localhost:27017" DB_DATABASE="credit_exchanger" bash scripts/seed-db.sh
