@@ -2,6 +2,7 @@
 name = "credit-exchanger"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/Dost-2-0-FK/credit-exchanger"
 
 [dependencies]
 actix-web = "4.12.1"
@@ -25,3 +26,8 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }
 [dev-dependencies]
 mockito = "1.7.0"
 serial_test = "3.2.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
