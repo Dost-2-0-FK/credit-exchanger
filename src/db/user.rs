@@ -74,7 +74,11 @@ impl User {
             }
             Self::Unit(user) => ApiUser::Unit(domain::base_user::BaseUser::<
                 domain::unit_user::UnitUser,
-            >::new(&user.id, Arc::new(user.credit))),
+            >::new(
+                user.role.resources,
+                &user.id,
+                Arc::new(user.credit),
+            )),
         }
     }
 
@@ -128,7 +132,8 @@ impl User {
         match self {
             Self::Bloc(user) => Some(&mut user.role.resources),
             Self::Zone(user) => Some(&mut user.role.resources),
-            Self::Individual(_) | Self::Unit(_) => None,
+            Self::Unit(user) => Some(&mut user.role.resources),
+            Self::Individual(_) => None,
         }
     }
 
@@ -136,7 +141,8 @@ impl User {
         match self {
             Self::Bloc(user) => Some(&user.role.resources),
             Self::Zone(user) => Some(&user.role.resources),
-            Self::Individual(_) | Self::Unit(_) => None,
+            Self::Unit(user) => Some(&user.role.resources),
+            Self::Individual(_) => None,
         }
     }
 

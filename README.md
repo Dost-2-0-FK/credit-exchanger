@@ -161,7 +161,7 @@ Each user has:
 - `unique_id: str`
 - `credit: Credit` (money)
 
-Blocs and Zones have: 
+Blocs, Zones, and Units have: 
 - `resources: Dict<resource: str, credit: Credit>`
 
 Individuals

@@ -153,7 +153,9 @@ async fn create_user(
             domain::individual_user::IndividualUser,
         >::new(user_id, credit)),
         UserType::Unit => User::Unit(
-            domain::base_user::BaseUser::<domain::unit_user::UnitUser>::new(user_id, credit),
+            domain::base_user::BaseUser::<domain::unit_user::UnitUser>::new(
+                resources, user_id, credit,
+            ),
         ),
     };
 
@@ -576,7 +578,7 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
             sr_overflow_notifications.push((user_id.clone(), *overflow));
         }
 
-        // Evaluate resource credits (Bloc/Zone only)
+        // Evaluate resource credits for non-unit users.
         if let Some(resources) = user.resources_mut() {
             for (resource_name, resource_credit) in resources.iter_mut() {
                 let resource_eval = resource_credit.evaluate();
@@ -598,6 +600,7 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
 
     for user in users.iter_mut() {
         let user_id_str = user.id().to_string();
+        let is_unit = user.is_unit();
 
         // Apply money credit incoming and record hourly history
         let incoming = incoming_amounts.remove(&user_id_str).unwrap_or_default();
@@ -605,11 +608,11 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
             let incoming_sum: f32 = incoming.iter().sum();
             user.credit_mut().apply_amount(incoming_sum);
         }
-        if !user.is_unit() {
+        if !is_unit {
             user.credit_mut().hourly(incoming);
         }
 
-        // Apply resource credit incoming and record hourly history (Bloc/Zone only)
+        // Apply resource credit incoming and record hourly history.
         if let Some(resources) = user.resources_mut() {
             for (resource_name, resource_credit) in resources.iter_mut() {
                 let key = (user_id_str.clone(), resource_name.clone());
@@ -617,7 +620,9 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
                 if !res_incoming.is_empty() {
                     resource_credit.apply_amount(res_incoming.iter().sum());
                 }
-                resource_credit.hourly(res_incoming);
+                if !is_unit {
+                    resource_credit.hourly(res_incoming);
+                }
             }
         }
 
@@ -677,7 +682,7 @@ async fn evaluate_daily(client: web::Data<MongoClient>) -> impl Responder {
 
         user.credit_mut().calc_avrg();
 
-        // Also recalculate resource credit averages (Bloc/Zone only)
+        // Also recalculate resource credit averages.
         if let Some(resources) = user.resources_mut() {
             for resource_credit in resources.values_mut() {
                 resource_credit.calc_avrg();
@@ -1201,6 +1206,7 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["id"], "test_unit_user");
         assert_eq!(body["userType"], "unit");
+        assert_eq!(body["resources"], serde_json::json!({}));
         assert_eq!(body["credit"]["total"], 0.0);
         assert_eq!(body["credit"]["last_day_average"], 0.0);
         assert_eq!(body["credit"]["subscriptions"], serde_json::json!([]));
@@ -1916,14 +1922,7 @@ mod tests {
             .to_request();
         test::call_service(&app, receiver_req).await;
 
-        // Seed oil credit via DB directly
-        let mongo_client_data = test_client().await;
-        // Use a fresh client with the same DB as the app's client by re-using the test app
-        // Instead, inject oil resource via resource subscription creation then manually
-        // seed balance using the repository
-        // Simplest: test via a known-path — add resource by posting a resource subscription first
-        // to create the slot, then see booking fails with zero balance.
-        // Actually test: booking from sender with 0 oil balance → bad request (insufficient)
+        // Booking from sender without an oil resource returns NotFound.
         let booking_req = test::TestRequest::post()
             .uri("/users/bloc_res_sender/bookings")
             .set_json(serde_json::json!({
@@ -2019,6 +2018,100 @@ mod tests {
         let user_body: serde_json::Value = test::read_body_json(get_resp).await;
         let oil_subs = &user_body["resources"]["oil"]["subscriptions"];
         assert_eq!(oil_subs.as_array().map(|a| a.len()).unwrap_or(0), 1);
+    }
+
+    #[actix_web::test]
+    async fn test_resource_subscription_attached_to_unit_resource_credit() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(create_subscription)
+                .service(get_user),
+        )
+        .await;
+
+        let owner_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "unit_sub_owner", "userType": "unit"}))
+            .to_request();
+        test::call_service(&app, owner_req).await;
+
+        let receiver_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "bloc_sub_receiver_for_unit", "userType": "bloc"}))
+            .to_request();
+        test::call_service(&app, receiver_req).await;
+
+        let sub_req = test::TestRequest::post()
+            .uri("/users/unit_sub_owner/subscriptions")
+            .set_json(serde_json::json!({
+                "receiver": "bloc_sub_receiver_for_unit",
+                "value": 20.0,
+                "subscriptionType": "contract",
+                "priority": 1,
+                "creditType": "oil"
+            }))
+            .to_request();
+        let sub_resp = test::call_service(&app, sub_req).await;
+        assert_eq!(sub_resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let get_req = test::TestRequest::get().uri("/users/unit_sub_owner").to_request();
+        let get_resp = test::call_service(&app, get_req).await;
+        let user_body: serde_json::Value = test::read_body_json(get_resp).await;
+        let oil_subs = &user_body["resources"]["oil"]["subscriptions"];
+        assert_eq!(oil_subs.as_array().map(|a| a.len()).unwrap_or(0), 1);
+    }
+
+    #[actix_web::test]
+    async fn test_evaluate_hourly_skips_unit_resource_history() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(create_subscription)
+                .service(evaluate_hourly)
+                .service(get_user),
+        )
+        .await;
+
+        let owner_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "unit_hourly_resource_owner", "userType": "unit"}))
+            .to_request();
+        test::call_service(&app, owner_req).await;
+
+        let receiver_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "bloc_hourly_resource_receiver", "userType": "bloc"}))
+            .to_request();
+        test::call_service(&app, receiver_req).await;
+
+        let sub_req = test::TestRequest::post()
+            .uri("/users/unit_hourly_resource_owner/subscriptions")
+            .set_json(serde_json::json!({
+                "receiver": "bloc_hourly_resource_receiver",
+                "value": 20.0,
+                "subscriptionType": "contract",
+                "priority": 1,
+                "creditType": "oil"
+            }))
+            .to_request();
+        let sub_resp = test::call_service(&app, sub_req).await;
+        assert_eq!(sub_resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let eval_req = test::TestRequest::post().uri("/evaluations/hourly").to_request();
+        let eval_resp = test::call_service(&app, eval_req).await;
+        assert_eq!(eval_resp.status(), actix_web::http::StatusCode::OK);
+
+        let get_req = test::TestRequest::get()
+            .uri("/users/unit_hourly_resource_owner")
+            .to_request();
+        let get_resp = test::call_service(&app, get_req).await;
+        let user_body: serde_json::Value = test::read_body_json(get_resp).await;
+        assert_eq!(user_body["resources"]["oil"]["history"], serde_json::json!([]));
     }
 
     #[actix_web::test]

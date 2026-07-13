@@ -76,7 +76,7 @@ function normalizeUser(userType, user) {
     credit: normalizeCredit(user.credit),
   };
 
-  if (userType === 'Bloc' || userType === 'Zone') {
+  if (userType === 'Bloc' || userType === 'Zone' || userType === 'Unit') {
     base.resources = normalizeResources(user.resources);
   }
 
