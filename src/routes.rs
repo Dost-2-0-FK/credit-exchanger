@@ -555,15 +555,16 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
     let mut booked_subscriptions = 0usize;
 
     for user in users.iter_mut() {
-        if user.is_unit() {
-            continue;
-        }
-
         evaluated_users += 1;
         let user_id = user.id().to_string();
+        let is_unit = user.is_unit();
 
         // Evaluate money credit
-        let evaluation = user.credit_mut().evaluate();
+        let evaluation = if is_unit {
+            user.credit().evaluate_without_balance()
+        } else {
+            user.credit_mut().evaluate()
+        };
         booked_subscriptions += evaluation.booked_subscriptions().len();
 
         for booked_subscription in evaluation.booked_subscriptions() {
@@ -581,10 +582,14 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
             sr_overflow_notifications.push((user_id.clone(), *overflow));
         }
 
-        // Evaluate resource credits for non-unit users.
+        // Evaluate resource credits.
         if let Some(resources) = user.resources_mut() {
             for (resource_name, resource_credit) in resources.iter_mut() {
-                let resource_eval = resource_credit.evaluate();
+                let resource_eval = if is_unit {
+                    resource_credit.evaluate_without_balance()
+                } else {
+                    resource_credit.evaluate()
+                };
                 booked_subscriptions += resource_eval.booked_subscriptions().len();
 
                 for booked_sub in resource_eval.booked_subscriptions() {
@@ -617,9 +622,32 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
 
         // Apply resource credit incoming and record hourly history.
         if let Some(resources) = user.resources_mut() {
-            for (resource_name, resource_credit) in resources.iter_mut() {
+            let existing_resource_names: Vec<String> = resources.keys().cloned().collect();
+            for resource_name in existing_resource_names {
                 let key = (user_id_str.clone(), resource_name.clone());
                 let res_incoming = resource_incoming_amounts.remove(&key).unwrap_or_default();
+                let resource_credit = resources
+                    .get_mut(&resource_name)
+                    .expect("resource name came from resources map");
+                if !res_incoming.is_empty() {
+                    resource_credit.apply_amount(res_incoming.iter().sum());
+                }
+                if !is_unit {
+                    resource_credit.hourly(res_incoming);
+                }
+            }
+
+            let incoming_resource_names: Vec<String> = resource_incoming_amounts
+                .keys()
+                .filter(|(receiver_id, _)| receiver_id == &user_id_str)
+                .map(|(_, resource_name)| resource_name.clone())
+                .collect();
+            for resource_name in incoming_resource_names {
+                let key = (user_id_str.clone(), resource_name.clone());
+                let res_incoming = resource_incoming_amounts.remove(&key).unwrap_or_default();
+                let resource_credit = resources
+                    .entry(resource_name)
+                    .or_insert_with(|| Credit::new(0.0, 0.0, vec![], vec![]));
                 if !res_incoming.is_empty() {
                     resource_credit.apply_amount(res_incoming.iter().sum());
                 }
@@ -2129,6 +2157,7 @@ mod tests {
                 .app_data(client)
                 .service(create_user)
                 .service(create_subscription)
+                .service(update_user)
                 .service(evaluate_hourly)
                 .service(get_user),
         )
@@ -2159,6 +2188,13 @@ mod tests {
         let sub_resp = test::call_service(&app, sub_req).await;
         assert_eq!(sub_resp.status(), actix_web::http::StatusCode::CREATED);
 
+        let patch_req = test::TestRequest::patch()
+            .uri("/users/unit_hourly_resource_owner")
+            .set_json(serde_json::json!({"creditType": "oil", "lastDayAverage": 100.0}))
+            .to_request();
+        let patch_resp = test::call_service(&app, patch_req).await;
+        assert_eq!(patch_resp.status(), actix_web::http::StatusCode::OK);
+
         let eval_req = test::TestRequest::post().uri("/evaluations/hourly").to_request();
         let eval_resp = test::call_service(&app, eval_req).await;
         assert_eq!(eval_resp.status(), actix_web::http::StatusCode::OK);
@@ -2169,6 +2205,14 @@ mod tests {
         let get_resp = test::call_service(&app, get_req).await;
         let user_body: serde_json::Value = test::read_body_json(get_resp).await;
         assert_eq!(user_body["resources"]["oil"]["history"], serde_json::json!([]));
+        assert_eq!(user_body["resources"]["oil"]["total"], 0.0);
+
+        let get_receiver_req = test::TestRequest::get()
+            .uri("/users/bloc_hourly_resource_receiver")
+            .to_request();
+        let get_receiver_resp = test::call_service(&app, get_receiver_req).await;
+        let receiver_body: serde_json::Value = test::read_body_json(get_receiver_resp).await;
+        assert_eq!(receiver_body["resources"]["oil"]["total"], 20.0);
     }
 
     #[actix_web::test]

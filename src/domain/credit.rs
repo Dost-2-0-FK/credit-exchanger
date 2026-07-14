@@ -148,14 +148,7 @@ impl Credit {
 
     #[allow(dead_code)]
     pub(crate) fn evaluate(&mut self) -> CreditEvaluation {
-        let mut subscriptions = self.subscriptions.clone();
-        subscriptions.sort_by(|left, right| {
-            subscription_type_rank(left.subscription_type())
-                .cmp(&subscription_type_rank(right.subscription_type()))
-                .then_with(|| right.priority().cmp(&left.priority()))
-                .then_with(|| left.id().cmp(right.id()))
-        });
-
+        let subscriptions = sorted_subscriptions(&self.subscriptions);
         let started_positive = self.total > 0.0;
         let mut evaluation = CreditEvaluation::default();
 
@@ -179,6 +172,20 @@ impl Credit {
 
         evaluation
     }
+
+    pub(crate) fn evaluate_without_balance(&self) -> CreditEvaluation {
+        let subscriptions = sorted_subscriptions(&self.subscriptions);
+        let mut evaluation = CreditEvaluation::default();
+
+        for subscription in subscriptions {
+            let amount = subscription.calc(self.last_day_average);
+            evaluation
+                .booked_subscriptions
+                .push(EvaluatedSubscription::from_subscription(&subscription, amount));
+        }
+
+        evaluation
+    }
 }
 
 #[allow(dead_code)]
@@ -187,6 +194,17 @@ fn subscription_type_rank(subscription_type: SubscriptionType) -> u8 {
         SubscriptionType::Sr => 0,
         SubscriptionType::Contract => 1,
     }
+}
+
+fn sorted_subscriptions(subscriptions: &[Arc<Subscription>]) -> Vec<Arc<Subscription>> {
+    let mut subscriptions = subscriptions.to_vec();
+    subscriptions.sort_by(|left, right| {
+        subscription_type_rank(left.subscription_type())
+            .cmp(&subscription_type_rank(right.subscription_type()))
+            .then_with(|| right.priority().cmp(&left.priority()))
+            .then_with(|| left.id().cmp(right.id()))
+    });
+    subscriptions
 }
 
 #[cfg(test)]
