@@ -1,6 +1,6 @@
 [package]
 name = "credit-exchanger"
-version = "0.2.0-pre.0"
+version = "0.2.0-pre.1"
 edition = "2024"
 repository = "https://github.com/Dost-2-0-FK/credit-exchanger"
 
