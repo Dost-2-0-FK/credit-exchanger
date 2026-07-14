@@ -90,6 +90,10 @@ impl Credit {
         self.last_day_average
     }
 
+    pub(crate) fn set_last_day_average(&mut self, last_day_average: f32) {
+        self.last_day_average = last_day_average;
+    }
+
     pub(crate) fn subscriptions(&self) -> &[Arc<Subscription>] {
         &self.subscriptions
     }

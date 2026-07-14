@@ -207,16 +207,19 @@ async fn update_user(
         return HttpResponse::MethodNotAllowed().body("Only unit users can be updated");
     }
 
-    if body.credit_type() != "money" {
-        return HttpResponse::NotFound().body("Credit type not found for unit user");
-    }
-
     match repository
-        .update_unit_last_day_average(&user_id, body.last_day_average())
+        .update_unit_credit_last_day_average(
+            &user_id,
+            body.credit_type(),
+            body.last_day_average(),
+        )
         .await
     {
         Ok(Some(user)) => HttpResponse::Ok().json(user),
         Ok(None) => HttpResponse::NotFound().finish(),
+        Err(crate::db::error::Error::NotFound(_)) => {
+            HttpResponse::NotFound().body("Credit type not found for unit user")
+        }
         Err(err) => {
             HttpResponse::InternalServerError().body(format!("Failed to update user: {err}"))
         }
@@ -1334,6 +1337,60 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, patch_req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn test_update_unit_user_resource_last_day_average_returns_ok() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(create_subscription)
+                .service(update_user)
+                .service(get_user),
+        )
+        .await;
+
+        let create_unit_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "patch_unit_resource_user", "userType": "unit"}))
+            .to_request();
+        test::call_service(&app, create_unit_req).await;
+
+        let create_receiver_req = test::TestRequest::post()
+            .uri("/users")
+            .set_json(serde_json::json!({"id": "patch_unit_resource_receiver", "userType": "bloc"}))
+            .to_request();
+        test::call_service(&app, create_receiver_req).await;
+
+        let sub_req = test::TestRequest::post()
+            .uri("/users/patch_unit_resource_user/subscriptions")
+            .set_json(serde_json::json!({
+                "receiver": "patch_unit_resource_receiver",
+                "value": 20.0,
+                "subscriptionType": "contract",
+                "priority": 1,
+                "creditType": "oil"
+            }))
+            .to_request();
+        let sub_resp = test::call_service(&app, sub_req).await;
+        assert_eq!(sub_resp.status(), actix_web::http::StatusCode::CREATED);
+
+        let patch_req = test::TestRequest::patch()
+            .uri("/users/patch_unit_resource_user")
+            .set_json(serde_json::json!({"creditType": "oil", "lastDayAverage": 7.5}))
+            .to_request();
+        let patch_resp = test::call_service(&app, patch_req).await;
+        assert_eq!(patch_resp.status(), actix_web::http::StatusCode::OK);
+
+        let get_req = test::TestRequest::get()
+            .uri("/users/patch_unit_resource_user")
+            .to_request();
+        let get_resp = test::call_service(&app, get_req).await;
+        let user_body: serde_json::Value = test::read_body_json(get_resp).await;
+        assert_eq!(user_body["resources"]["oil"]["last_day_average"], 7.5);
+        assert_eq!(user_body["credit"]["last_day_average"], 0.0);
     }
 
     #[actix_web::test]

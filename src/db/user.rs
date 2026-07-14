@@ -334,21 +334,31 @@ impl UsersRepository {
         Ok(Some(user.into_api_user()))
     }
 
-    pub(crate) async fn update_unit_last_day_average(
+    pub(crate) async fn update_unit_credit_last_day_average(
         &self,
         user_id: &str,
+        credit_type: &str,
         last_day_average: f32,
     ) -> Result<Option<ApiUser>> {
-        let update = mongodb::bson::doc! {
-            "$set": {
-                "credit.last_day_average": last_day_average,
-            }
+        let Some(mut user) = self.get_db_user(user_id).await? else {
+            return Ok(None);
         };
 
-        self.db
-            .update_document_by_field("users", "_id", user_id, update)
-            .await?;
-        self.get_user(user_id).await
+        if credit_type == "money" {
+            user.credit_mut().set_last_day_average(last_day_average);
+        } else {
+            let Some(resource_credit) = user
+                .resources_mut()
+                .and_then(|resources| resources.get_mut(credit_type))
+            else {
+                return Err(crate::db::error::Error::NotFound("credit type"));
+            };
+
+            resource_credit.set_last_day_average(last_day_average);
+        }
+
+        self.replace_db_user(&user).await?;
+        Ok(Some(user.into_api_user()))
     }
 
     pub(crate) async fn book_money(
