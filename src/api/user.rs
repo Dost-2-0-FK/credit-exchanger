@@ -14,9 +14,10 @@ use crate::domain::{
 
 /// This struct contains a user with reduces fields
 #[derive(Serialize, Deserialize, ToSchema)]
-#[serde(tag = "userType")]
+#[serde(rename_all="camelCase")]
 pub(crate) struct ListUser {
     id: String,
+    user_type: UserType,
     credit: ListUserCredit,
     #[serde(skip_serializing_if = "Option::is_none")]
     resources: Option<HashMap<String, ListUserCredit>>,
@@ -48,24 +49,28 @@ impl User {
 
 impl From<User> for ListUser {
     fn from(value: User) -> Self {
-        let (id, credit, resources): (String, ListUserCredit, _) = match value {
+        let (id, user_type, credit, resources) = match value {
             User::Bloc(base_user) => (
                 base_user.id().into(),
+                UserType::Bloc,
                 base_user.credit().clone().into(),
                 base_user.role().resources().clone().into(),
             ),
             User::Zone(base_user) => (
                 base_user.id().into(),
+                UserType::Zone,
                 base_user.credit().clone().into(),
                 base_user.role().resources().clone().into(),
             ),
             User::Individual(base_user) => (
                 base_user.id().into(),
+                UserType::Individual,
                 base_user.credit().clone().into(),
                 None,
             ),
             User::Unit(base_user) => (
                 base_user.id().into(),
+                UserType::Unit,
                 base_user.credit().clone().into(),
                 base_user.role().resources().clone().into(),
             ),
@@ -78,6 +83,7 @@ impl From<User> for ListUser {
         });
         Self {
             id,
+            user_type,
             credit,
             resources,
         }
@@ -118,7 +124,7 @@ impl PatchUserRequest {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum UserType {
     Bloc,
