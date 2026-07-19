@@ -73,6 +73,30 @@ impl CreditEvaluation {
 }
 
 #[derive(Serialize, Deserialize, Constructor, Clone, ToSchema)]
+pub(crate) struct ListUserCredit {
+    total: f32,
+    last_day_average: f32,
+}
+
+impl From<Arc<Credit>> for ListUserCredit {
+    fn from(value: Arc<Credit>) -> Self {
+        Self {
+            total: value.total(),
+            last_day_average: value.last_day_average(),
+        }
+    }
+}
+
+impl From<Credit> for ListUserCredit {
+    fn from(value: Credit) -> Self {
+        Self {
+            total: value.total(),
+            last_day_average: value.last_day_average(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Constructor, Clone, ToSchema)]
 pub(crate) struct Credit {
     total: f32,
     last_day_average: f32,

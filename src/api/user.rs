@@ -1,10 +1,26 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::{
-    base_user::BaseUser, bloc_user::BlocUser, individual_user::IndividualUser, unit_user::UnitUser,
+    base_user::BaseUser,
+    bloc_user::BlocUser,
+    credit::ListUserCredit,
+    individual_user::IndividualUser,
+    unit_user::UnitUser,
     zone_user::ZoneUser,
 };
+
+/// This struct contains a user with reduces fields
+#[derive(Serialize, Deserialize, ToSchema)]
+#[serde(tag = "userType")]
+pub(crate) struct ListUser {
+    id: String,
+    credit: ListUserCredit,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resources: Option<HashMap<String, ListUserCredit>>,
+}
 
 #[derive(Serialize, Deserialize, ToSchema)]
 #[serde(tag = "userType")]
@@ -26,6 +42,44 @@ impl User {
             Self::Zone(user) => user.id(),
             Self::Individual(user) => user.id(),
             Self::Unit(user) => user.id(),
+        }
+    }
+}
+
+impl From<User> for ListUser {
+    fn from(value: User) -> Self {
+        let (id, credit, resources): (String, ListUserCredit, _) = match value {
+            User::Bloc(base_user) => (
+                base_user.id().into(),
+                base_user.credit().clone().into(),
+                base_user.role().resources().clone().into(),
+            ),
+            User::Zone(base_user) => (
+                base_user.id().into(),
+                base_user.credit().clone().into(),
+                base_user.role().resources().clone().into(),
+            ),
+            User::Individual(base_user) => (
+                base_user.id().into(),
+                base_user.credit().clone().into(),
+                None,
+            ),
+            User::Unit(base_user) => (
+                base_user.id().into(),
+                base_user.credit().clone().into(),
+                base_user.role().resources().clone().into(),
+            ),
+        };
+        let resources = resources.map(|resources| {
+            resources
+                .into_iter()
+                .map(|(key, value)| (key, value.into()))
+                .collect()
+        });
+        Self {
+            id,
+            credit,
+            resources,
         }
     }
 }

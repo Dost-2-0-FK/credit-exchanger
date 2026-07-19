@@ -4,12 +4,10 @@ use derive_more::Constructor;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    api::user::User as ApiUser,
-    db::{
+    api::user::{ListUser, User as ApiUser}, db::{
         base_user::BaseUser, bloc_user::BlocUser, error::Result, individual_user::IndividualUser,
         mongo_client::MongoClient, unit_user::UnitUser, zone_user::ZoneUser,
-    },
-    domain::{self, subscription::Subscription},
+    }, domain::{self, subscription::Subscription},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -278,13 +276,13 @@ impl UsersRepository {
         Ok(Some(user))
     }
 
-    pub(crate) async fn list_users(&self) -> Result<Vec<ApiUser>> {
+    pub(crate) async fn list_users(&self) -> Result<Vec<ListUser>> {
         let user_docs = self.db.list_documents("users").await?;
         user_docs
             .into_iter()
             .map(|user_doc| {
                 mongodb::bson::from_document::<User>(user_doc)
-                    .map(User::into_api_user)
+                    .map(User::into_api_user).map(Into::into)
                     .map_err(Into::into)
             })
             .collect()
