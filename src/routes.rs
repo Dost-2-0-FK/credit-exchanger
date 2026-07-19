@@ -732,6 +732,10 @@ async fn evaluate_daily(client: web::Data<MongoClient>) -> impl Responder {
 }
 
 async fn notify_blackout_controller(user_id: &str) -> Result<(), reqwest::Error> {
+    // TODO: Call BLACKOUT-SERVICE
+    log::warn!("Called unimplemented BLACKOUT-SERVICE for user id {user_id}");
+    return Ok(());
+    #[expect(unreachable_code)]
     let base_url = std::env::var(BLACKOUT_CONTROLLER_URL_ENV)
         .unwrap_or_else(|_| "http://BLACKOUT-SERVICE".to_string());
     let url = format!(
@@ -748,6 +752,10 @@ async fn notify_blackout_controller(user_id: &str) -> Result<(), reqwest::Error>
 }
 
 async fn notify_ai_wo_a_controller(user_id: &str, overflow: f32) -> Result<(), reqwest::Error> {
+    // TODO: Call AI-WO-A-SERVICE
+    log::warn!("Called unimplemented AI-WO-A-SERVICE for user id {user_id} and overflow {overflow}");
+    return Ok(());
+    #[expect(unreachable_code)]
     let base_url = std::env::var(AI_WO_A_CONTROLLER_URL_ENV)
         .unwrap_or_else(|_| "http://AI-WO-A-SERVICE".to_string());
     let url = format!(
