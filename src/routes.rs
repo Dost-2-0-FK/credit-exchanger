@@ -410,6 +410,7 @@ async fn get_subscription(
     subscription_id: Path<String>,
 ) -> impl Responder {
     let repository = SubscriptionsRepository::new(client.get_ref().clone());
+    let users_repository = UsersRepository::new(client.get_ref().clone());
     let subscription_id = subscription_id.into_inner();
     let object_id = match mongodb::bson::oid::ObjectId::parse_str(&subscription_id) {
         Ok(object_id) => object_id,
@@ -417,9 +418,17 @@ async fn get_subscription(
     };
 
     match repository.get_subscription(&object_id).await {
-        Ok(Some(subscription)) => {
-            HttpResponse::Ok().json(GetSubscriptionResponse::from(subscription))
-        }
+        Ok(Some(subscription)) => match users_repository
+            .find_subscription_sender(&subscription_id)
+            .await
+        {
+            Ok(Some(sender)) => {
+                HttpResponse::Ok().json(GetSubscriptionResponse::new(sender, subscription))
+            }
+            Ok(None) => HttpResponse::NotFound().finish(),
+            Err(err) => HttpResponse::InternalServerError()
+                .body(format!("Failed to resolve subscription sender: {err}")),
+        },
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => {
             HttpResponse::InternalServerError().body(format!("Failed to get subscription: {err}"))
@@ -511,7 +520,8 @@ async fn create_subscription(
                 }
             };
             match attach_result {
-                Ok(Some(_)) => HttpResponse::Created().json(GetSubscriptionResponse::from(subscription)),
+                Ok(Some(_)) => HttpResponse::Created()
+                    .json(GetSubscriptionResponse::new(user_id, subscription)),
                 Ok(None) => HttpResponse::NotFound().body("User not found"),
                 Err(err) => HttpResponse::InternalServerError()
                     .body(format!("Failed to attach subscription to user: {err}")),
@@ -777,15 +787,25 @@ struct ListSubscriptionsResponse {
     subscriptions: Vec<GetSubscriptionResponse>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListSubscriptionsQuery {
+    sender: Option<String>,
+    receiver: Option<String>,
+}
+
 #[utoipa::path(
     get,
     path = "/users/{user_id}/subscriptions",
     tag = "users",
     params(
-        ("user_id" = String, Path, description = "User ID")
+        ("user_id" = String, Path, description = "User ID"),
+        ("sender" = Option<String>, Query, description = "Filter by sender user ID"),
+        ("receiver" = Option<String>, Query, description = "Filter by receiver user ID")
     ),
     responses(
         (status = 200, description = "User subscriptions", body = ListSubscriptionsResponse),
+        (status = 400, description = "Contradictory sender and receiver filters"),
         (status = 404, description = "User not found")
     )
 )]
@@ -794,13 +814,34 @@ struct ListSubscriptionsResponse {
 async fn list_user_subscriptions(
     client: web::Data<MongoClient>,
     user_id: Path<String>,
+    query: web::Query<ListSubscriptionsQuery>,
 ) -> impl Responder {
     let repository = UsersRepository::new(client.get_ref().clone());
     let user_id = user_id.into_inner();
 
-    match repository.list_user_subscriptions(&user_id).await {
+    if let (Some(sender), Some(receiver)) = (&query.sender, &query.receiver)
+        && sender != &user_id
+        && receiver != &user_id
+    {
+        return HttpResponse::BadRequest()
+            .body("Either sender or receiver must match the user ID in the path");
+    }
+
+    match repository
+        .list_user_subscriptions(
+            &user_id,
+            query.sender.as_deref(),
+            query.receiver.as_deref(),
+        )
+        .await
+    {
         Ok(Some(subs)) => HttpResponse::Ok().json(ListSubscriptionsResponse {
-            subscriptions: subs.into_iter().map(GetSubscriptionResponse::from).collect(),
+            subscriptions: subs
+                .into_iter()
+                .map(|(sender, subscription)| {
+                    GetSubscriptionResponse::new(sender, subscription)
+                })
+                .collect(),
         }),
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(err) => HttpResponse::InternalServerError()
@@ -830,10 +871,17 @@ async fn get_user_subscription(
     let repository = UsersRepository::new(client.get_ref().clone());
     let (user_id, subscription_id) = path.into_inner();
 
-    match repository.list_user_subscriptions(&user_id).await {
+    match repository
+        .list_user_subscriptions(&user_id, None, None)
+        .await
+    {
         Ok(Some(subs)) => {
-            match subs.into_iter().find(|s| s.id() == subscription_id) {
-                Some(sub) => HttpResponse::Ok().json(GetSubscriptionResponse::from(sub)),
+            match subs
+                .into_iter()
+                .find(|(_, subscription)| subscription.id() == subscription_id)
+            {
+                Some((sender, subscription)) => HttpResponse::Ok()
+                    .json(GetSubscriptionResponse::new(sender, subscription)),
                 None => HttpResponse::NotFound().finish(),
             }
         }
@@ -1647,6 +1695,8 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::CREATED);
+        let subscription: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(subscription["sender"], "subscription_owner");
 
         let get_user_req = test::TestRequest::get()
             .uri("/users/subscription_owner")
@@ -1697,6 +1747,7 @@ mod tests {
         assert_eq!(create_resp.status(), actix_web::http::StatusCode::CREATED);
 
         let body: serde_json::Value = test::read_body_json(create_resp).await;
+        assert_eq!(body["sender"], "subscription_get_owner");
         let id = body["id"].as_str().expect("id missing in response");
 
         let get_req = test::TestRequest::get()
@@ -1704,6 +1755,8 @@ mod tests {
             .to_request();
         let get_resp = test::call_service(&app, get_req).await;
         assert_eq!(get_resp.status(), actix_web::http::StatusCode::OK);
+        let body: serde_json::Value = test::read_body_json(get_resp).await;
+        assert_eq!(body["sender"], "subscription_get_owner");
     }
 
     #[actix_web::test]
@@ -2302,7 +2355,150 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         let subs = body["subscriptions"].as_array().expect("subscriptions array");
         assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0]["sender"], owner_id);
         assert_eq!(subs[0]["creditType"], "money");
+    }
+
+    #[actix_web::test]
+    async fn test_list_user_subscriptions_includes_incoming_and_filters_by_participants() {
+        let client = test_client().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(client)
+                .service(create_user)
+                .service(create_subscription)
+                .service(list_user_subscriptions)
+                .service(get_user_subscription),
+        )
+        .await;
+
+        let sender_id = format!(
+            "sub_filter_sender_{}",
+            mongodb::bson::oid::ObjectId::new().to_hex()
+        );
+        let receiver_id = format!(
+            "sub_filter_receiver_{}",
+            mongodb::bson::oid::ObjectId::new().to_hex()
+        );
+
+        for id in [&sender_id, &receiver_id] {
+            test::call_service(
+                &app,
+                test::TestRequest::post()
+                    .uri("/users")
+                    .set_json(serde_json::json!({"id": id, "userType": "individual"}))
+                    .to_request(),
+            )
+            .await;
+        }
+
+        let create_resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/users/{sender_id}/subscriptions"))
+                .set_json(serde_json::json!({
+                    "receiver": &receiver_id,
+                    "value": 10.0,
+                    "subscriptionType": "contract",
+                    "priority": 1
+                }))
+                .to_request(),
+        )
+        .await;
+        let created: serde_json::Value = test::read_body_json(create_resp).await;
+        let subscription_id = created["id"].as_str().expect("subscription id");
+
+        let incoming_resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!("/users/{receiver_id}/subscriptions"))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(incoming_resp.status(), actix_web::http::StatusCode::OK);
+        let incoming: serde_json::Value = test::read_body_json(incoming_resp).await;
+        assert_eq!(incoming["subscriptions"].as_array().map(Vec::len), Some(1));
+        assert_eq!(incoming["subscriptions"][0]["sender"], sender_id);
+        assert_eq!(incoming["subscriptions"][0]["receiver"], receiver_id);
+
+        let sender_filter_resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!(
+                    "/users/{receiver_id}/subscriptions?sender={sender_id}"
+                ))
+                .to_request(),
+        )
+        .await;
+        let sender_filtered: serde_json::Value =
+            test::read_body_json(sender_filter_resp).await;
+        assert_eq!(
+            sender_filtered["subscriptions"].as_array().map(Vec::len),
+            Some(1)
+        );
+
+        let receiver_filter_resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!(
+                    "/users/{sender_id}/subscriptions?receiver={receiver_id}"
+                ))
+                .to_request(),
+        )
+        .await;
+        let receiver_filtered: serde_json::Value =
+            test::read_body_json(receiver_filter_resp).await;
+        assert_eq!(
+            receiver_filtered["subscriptions"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+
+        let redundant_filters_resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!(
+                    "/users/{receiver_id}/subscriptions?sender={sender_id}&receiver={receiver_id}"
+                ))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(
+            redundant_filters_resp.status(),
+            actix_web::http::StatusCode::OK
+        );
+
+        let contradictory_filters_resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!(
+                    "/users/{receiver_id}/subscriptions?sender=someone_else&receiver=another_user"
+                ))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(
+            contradictory_filters_resp.status(),
+            actix_web::http::StatusCode::BAD_REQUEST
+        );
+
+        let incoming_item_resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&format!(
+                    "/users/{receiver_id}/subscriptions/{subscription_id}"
+                ))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(
+            incoming_item_resp.status(),
+            actix_web::http::StatusCode::OK
+        );
+        let incoming_item: serde_json::Value =
+            test::read_body_json(incoming_item_resp).await;
+        assert_eq!(incoming_item["sender"], sender_id);
     }
 
     #[actix_web::test]

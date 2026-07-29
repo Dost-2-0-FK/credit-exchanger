@@ -272,8 +272,8 @@ response body is
 ``` 
 
 #### Subscriptions
-- `GET /api/users/{user_id}/subscriptions/{subscription_id}`: returns Subscription object. 404 if user or subscription not found
-- `GET /api/users/{user_id}/subscriptions`: returns list of Subscription objects. 404 if user not found, empty list if user has no subscriptions
+- `GET /api/users/{user_id}/subscriptions/{subscription_id}`: returns an incoming or outgoing Subscription object. 404 if user or subscription not found
+- `GET /api/users/{user_id}/subscriptions`: returns incoming and outgoing Subscription objects. Supports exact-match `sender` and `receiver` query parameters. If both are provided, at least one must match `{user_id}`. Returns 404 if the user is not found and an empty list if the user has no matching subscriptions.
 response body is 
 
 ```json
@@ -281,6 +281,7 @@ response body is
   "subscriptions": [
     {
       "subscriptionId": "str",
+      "sender": "str", // user_id
       "receiver": "str", // user_id
       "value": "int", // value in percentage, might be positive or negative`
       "subscriptionType": "str", // "sr" or "contract"
@@ -311,4 +312,3 @@ returns full subscription object including id
 - `POST /api/evaluations/hourly`: evaluates non-unit users' money credit subscriptions, books successful outgoing transfers, appends hourly income to history, notifies the Blackout controller when an individual hits zero, and notifies the AI-WO-A controller when an `sr` subscription cannot be covered.
 
 - `POST /api/evaluations/daily`: recalculates `last_day_average` from each non-unit user's credit history and clears that history afterwards.
-

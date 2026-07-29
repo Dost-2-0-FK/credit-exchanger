@@ -44,6 +44,7 @@ impl CreateSubscriptionRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GetSubscriptionResponse {
     id: String,
+    sender: String,
     receiver: String,
     value: f32,
     subscription_type: SubscriptionType,
@@ -51,10 +52,11 @@ pub(crate) struct GetSubscriptionResponse {
     credit_type: String,
 }
 
-impl From<Subscription> for GetSubscriptionResponse {
-    fn from(subscription: Subscription) -> Self {
+impl GetSubscriptionResponse {
+    pub(crate) fn new(sender: String, subscription: Subscription) -> Self {
         Self {
             id: subscription.id().to_string(),
+            sender,
             receiver: subscription.receiver().to_string(),
             value: subscription.value(),
             subscription_type: subscription.subscription_type(),

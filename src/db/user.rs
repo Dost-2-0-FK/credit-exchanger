@@ -152,6 +152,27 @@ impl User {
             Self::Unit(user) => user.credit.subscriptions(),
         }
     }
+
+    fn subscriptions(&self) -> Vec<Subscription> {
+        let mut subscriptions = self
+            .credit_subscriptions()
+            .iter()
+            .map(|subscription| subscription.as_ref().clone())
+            .collect::<Vec<_>>();
+
+        if let Some(resources) = self.resources() {
+            for credit in resources.values() {
+                subscriptions.extend(
+                    credit
+                        .subscriptions()
+                        .iter()
+                        .map(|subscription| subscription.as_ref().clone()),
+                );
+            }
+        }
+
+        subscriptions
+    }
 }
 
 pub(crate) struct MoneyBookingOutcome {
@@ -423,31 +444,48 @@ impl UsersRepository {
         })
     }
 
-    /// Returns all subscriptions across all credits (money + resources) for a user.
+    /// Returns all incoming and outgoing subscriptions across all credits for a user.
     /// Returns `None` if the user does not exist.
     pub(crate) async fn list_user_subscriptions(
         &self,
         user_id: &str,
-    ) -> Result<Option<Vec<Subscription>>> {
-        let Some(user) = self.get_db_user(user_id).await? else {
+        sender_filter: Option<&str>,
+        receiver_filter: Option<&str>,
+    ) -> Result<Option<Vec<(String, Subscription)>>> {
+        let users = self.list_db_users().await?;
+        if !users.iter().any(|user| user.id() == user_id) {
             return Ok(None);
-        };
-
-        let mut subs: Vec<Subscription> = user
-            .credit_subscriptions()
-            .into_iter()
-            .map(|s| s.as_ref().clone())
-            .collect();
-
-        if let Some(resources) = user.resources() {
-            for credit in resources.values() {
-                for s in credit.subscriptions() {
-                    subs.push(s.as_ref().clone());
-                }
-            }
         }
 
-        Ok(Some(subs))
+        let subscriptions = users
+            .into_iter()
+            .flat_map(|user| {
+                let sender = user.id().to_string();
+                user.subscriptions()
+                    .into_iter()
+                    .map(move |subscription| (sender.clone(), subscription))
+            })
+            .filter(|(sender, subscription)| {
+                (sender == user_id || subscription.receiver() == user_id)
+                    && sender_filter.is_none_or(|filter| sender == filter)
+                    && receiver_filter
+                        .is_none_or(|filter| subscription.receiver() == filter)
+            })
+            .collect();
+
+        Ok(Some(subscriptions))
+    }
+
+    pub(crate) async fn find_subscription_sender(
+        &self,
+        subscription_id: &str,
+    ) -> Result<Option<String>> {
+        Ok(self.list_db_users().await?.into_iter().find_map(|user| {
+            user.subscriptions()
+                .iter()
+                .any(|subscription| subscription.id() == subscription_id)
+                .then(|| user.id().to_string())
+        }))
     }
 
     /// Remove a subscription (from money credit or any resource credit) for a user.
