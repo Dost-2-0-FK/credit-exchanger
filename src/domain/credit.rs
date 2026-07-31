@@ -17,6 +17,28 @@ pub(crate) struct EvaluatedSubscription {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct UnbookableSrTransfer {
+    receiver: String,
+    amount: f32,
+}
+
+#[allow(dead_code)]
+impl UnbookableSrTransfer {
+    fn new(receiver: String, amount: f32) -> Self {
+        Self { receiver, amount }
+    }
+
+    pub(crate) fn receiver(&self) -> &str {
+        &self.receiver
+    }
+
+    pub(crate) fn amount(&self) -> f32 {
+        self.amount
+    }
+}
+
+#[allow(dead_code)]
 impl EvaluatedSubscription {
     fn from_subscription(subscription: &Subscription, amount: f32) -> Self {
         Self {
@@ -53,7 +75,7 @@ impl EvaluatedSubscription {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct CreditEvaluation {
     booked_subscriptions: Vec<EvaluatedSubscription>,
-    sr_overflows: Vec<f32>,
+    unbookable_sr_transfers: Vec<UnbookableSrTransfer>,
     hit_zero: bool,
 }
 
@@ -72,8 +94,8 @@ impl CreditEvaluation {
         &self.booked_subscriptions
     }
 
-    pub(crate) fn sr_overflows(&self) -> &[f32] {
-        &self.sr_overflows
+    pub(crate) fn unbookable_sr_transfers(&self) -> &[UnbookableSrTransfer] {
+        &self.unbookable_sr_transfers
     }
 
     pub(crate) fn hit_zero(&self) -> bool {
@@ -237,7 +259,11 @@ impl Credit {
 
             if amount > 0.0 && self.total + f32::EPSILON < amount {
                 if matches!(subscription.subscription_type(), SubscriptionType::Sr) {
-                    evaluation.sr_overflows.push(amount - self.total);
+                    // Keep the full intended SR transfer amount for external notification.
+                    evaluation.unbookable_sr_transfers.push(UnbookableSrTransfer::new(
+                        subscription.receiver().to_string(),
+                        amount,
+                    ));
                 }
                 continue;
             }
@@ -355,13 +381,13 @@ mod tests {
             .map(EvaluatedSubscription::id)
             .collect();
         assert_eq!(booked_ids, vec!["sr"]);
-        assert!(evaluation.sr_overflows().is_empty());
+        assert!(evaluation.unbookable_sr_transfers().is_empty());
         assert!(!evaluation.hit_zero());
         assert_eq!(credit.total(), 5.0);
     }
 
     #[test]
-    fn test_evaluate_records_sr_overflow_when_booking_cannot_be_covered() {
+    fn test_evaluate_records_unbookable_sr_transfer_when_booking_cannot_be_covered() {
         let mut credit = Credit::new(
             5.0,
             100.0,
@@ -372,7 +398,9 @@ mod tests {
         let evaluation = credit.evaluate();
 
         assert!(evaluation.booked_subscriptions().is_empty());
-        assert_eq!(evaluation.sr_overflows(), &[5.0]);
+        assert_eq!(evaluation.unbookable_sr_transfers().len(), 1);
+        assert_eq!(evaluation.unbookable_sr_transfers()[0].receiver(), "receiver");
+        assert_eq!(evaluation.unbookable_sr_transfers()[0].amount(), 10.0);
         assert_eq!(credit.total(), 5.0);
     }
 

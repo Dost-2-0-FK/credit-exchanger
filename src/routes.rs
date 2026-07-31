@@ -34,8 +34,9 @@ struct CreditBooking {
     value: f32,
 }
 
-const BLACKOUT_CONTROLLER_URL_ENV: &str = "BLACKOUT_CONTROLLER_URL";
-const AI_WO_A_CONTROLLER_URL_ENV: &str = "AI_WO_A_CONTROLLER_URL";
+const BLACKOUT_CONTROLLER_URL: &str = "https://auth.dost-2-0-fk.art/api/users/blackout";
+const AI_WO_A_CONTROLLER_URL: &str = "https://auth.dost-2-0-fk.art/api/zone/sr-violation";
+const CONTROLLER_AUTH_BEARER_TOKEN: &str = "uefnwofnseufn";
 
 fn transfer_type_from_subscription_type(
     subscription_type: domain::subscription::SubscriptionType,
@@ -581,7 +582,7 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
     let mut resource_outgoing_transfers: HashMap<(String, String), Vec<TransferHistoryEntry>> =
         HashMap::new();
     let mut blackout_notifications = Vec::new();
-    let mut sr_overflow_notifications = Vec::new();
+    let mut sr_unbookable_notifications = Vec::new();
     let mut evaluated_users = 0usize;
     let mut booked_subscriptions = 0usize;
 
@@ -630,8 +631,12 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
             blackout_notifications.push(user_id.clone());
         }
 
-        for overflow in evaluation.sr_overflows() {
-            sr_overflow_notifications.push((user_id.clone(), *overflow));
+        for transfer in evaluation.unbookable_sr_transfers() {
+            sr_unbookable_notifications.push((
+                user_id.clone(),
+                transfer.receiver().to_string(),
+                transfer.amount(),
+            ));
         }
 
         // Evaluate resource credits.
@@ -672,8 +677,12 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
                         ));
                 }
 
-                for overflow in resource_eval.sr_overflows() {
-                    sr_overflow_notifications.push((user_id.clone(), *overflow));
+                for transfer in resource_eval.unbookable_sr_transfers() {
+                    sr_unbookable_notifications.push((
+                        user_id.clone(),
+                        transfer.receiver().to_string(),
+                        transfer.amount(),
+                    ));
                 }
             }
         }
@@ -764,8 +773,8 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
         }
     }
 
-    for (user_id, overflow) in &sr_overflow_notifications {
-        if let Err(err) = notify_ai_wo_a_controller(user_id, *overflow).await {
+    for (user_id, receiver, amount) in &sr_unbookable_notifications {
+        if let Err(err) = notify_ai_wo_a_controller(user_id, receiver, *amount).await {
             return HttpResponse::InternalServerError()
                 .body(format!("Failed to notify AI-WO-A controller: {err}"));
         }
@@ -775,7 +784,7 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
         evaluated_users,
         booked_subscriptions,
         blackout_notifications: blackout_notifications.len(),
-        sr_overflow_notifications: sr_overflow_notifications.len(),
+        sr_overflow_notifications: sr_unbookable_notifications.len(),
     })
 }
 
@@ -825,40 +834,31 @@ async fn evaluate_daily(client: web::Data<MongoClient>) -> impl Responder {
     HttpResponse::Ok().json(DailyEvaluationResponse { updated_users })
 }
 
-async fn notify_blackout_controller(user_id: &str) -> Result<(), reqwest::Error> {
-    // TODO: Call BLACKOUT-SERVICE
-    log::warn!("Called unimplemented BLACKOUT-SERVICE for user id {user_id}");
-    return Ok(());
-    #[expect(unreachable_code)]
-    let base_url = std::env::var(BLACKOUT_CONTROLLER_URL_ENV)
-        .unwrap_or_else(|_| "http://BLACKOUT-SERVICE".to_string());
-    let url = format!(
-        "{}/api/credit-overflow?id={user_id}",
-        base_url.trim_end_matches('/')
-    );
+async fn notify_blackout_controller(
+    user_id: &str,
+) -> Result<(), reqwest::Error> {
+    let url = format!("{}/{}", BLACKOUT_CONTROLLER_URL.trim_end_matches('/'), user_id);
 
     reqwest::Client::new()
-        .get(url)
+        .post(url)
+        .bearer_auth(CONTROLLER_AUTH_BEARER_TOKEN)
         .send()
         .await?
         .error_for_status()?;
     Ok(())
 }
 
-async fn notify_ai_wo_a_controller(user_id: &str, overflow: f32) -> Result<(), reqwest::Error> {
-    // TODO: Call AI-WO-A-SERVICE
-    log::warn!("Called unimplemented AI-WO-A-SERVICE for user id {user_id} and overflow {overflow}");
-    return Ok(());
-    #[expect(unreachable_code)]
-    let base_url = std::env::var(AI_WO_A_CONTROLLER_URL_ENV)
-        .unwrap_or_else(|_| "http://AI-WO-A-SERVICE".to_string());
-    let url = format!(
-        "{}/api/credit-overflow?id={user_id}&overflow={overflow}",
-        base_url.trim_end_matches('/')
-    );
+async fn notify_ai_wo_a_controller(
+    user_id: &str,
+    receiver: &str,
+    amount: f32,
+) -> Result<(), reqwest::Error> {
+    let url = format!("{}/{}", AI_WO_A_CONTROLLER_URL.trim_end_matches('/'), user_id);
 
     reqwest::Client::new()
-        .get(url)
+        .post(url)
+        .json(&serde_json::json!({ "amount": amount, "receiver": receiver }))
+        .bearer_auth(CONTROLLER_AUTH_BEARER_TOKEN)
         .send()
         .await?
         .error_for_status()?;
@@ -1566,17 +1566,13 @@ mod tests {
     async fn test_create_booking_notifies_blackout_when_individual_hits_zero() {
         let mut blackout_server = Server::new_async().await;
         let blackout_mock = blackout_server
-            .mock("GET", "/api/credit-overflow")
-            .match_query(mockito::Matcher::UrlEncoded(
-                "id".into(),
-                "booking_individual_user".into(),
-            ))
+            .mock("POST", "/booking_individual_user")
             .with_status(200)
             .create_async()
             .await;
 
         unsafe {
-            env::set_var(BLACKOUT_CONTROLLER_URL_ENV, blackout_server.url());
+            env::set_var(BLACKOUT_CONTROLLER_URL, blackout_server.url());
         }
 
         let client = test_client().await;
@@ -1674,7 +1670,7 @@ mod tests {
         );
 
         unsafe {
-            env::remove_var(BLACKOUT_CONTROLLER_URL_ENV);
+            env::remove_var(BLACKOUT_CONTROLLER_URL);
         }
     }
 
@@ -1958,27 +1954,22 @@ mod tests {
     async fn test_evaluate_hourly_updates_balances_history_and_notifications() {
         let mut controller_server = Server::new_async().await;
         let blackout_mock = controller_server
-            .mock("GET", "/api/credit-overflow")
-            .match_query(mockito::Matcher::UrlEncoded(
-                "id".into(),
-                "hourly_sender_zero".into(),
-            ))
+            .mock("POST", "/hourly_sender_zero")
             .with_status(200)
             .create_async()
             .await;
         let ai_mock = controller_server
-            .mock("GET", "/api/credit-overflow")
-            .match_query(mockito::Matcher::AllOf(vec![
-                mockito::Matcher::UrlEncoded("id".into(), "hourly_sender_overflow".into()),
-                mockito::Matcher::UrlEncoded("overflow".into(), "5".into()),
-            ]))
+            .mock("POST", "/hourly_sender_overflow")
+            .match_body(mockito::Matcher::Regex(
+                r#""amount"\s*:\s*10(?:\.0+)?\s*,\s*"receiver"\s*:\s*"hourly_receiver""#.to_string(),
+            ))
             .with_status(200)
             .create_async()
             .await;
 
         unsafe {
-            env::set_var(BLACKOUT_CONTROLLER_URL_ENV, controller_server.url());
-            env::set_var(AI_WO_A_CONTROLLER_URL_ENV, controller_server.url());
+            env::set_var(BLACKOUT_CONTROLLER_URL, controller_server.url());
+            env::set_var(AI_WO_A_CONTROLLER_URL, controller_server.url());
         }
 
         let client = test_client().await;
@@ -2130,8 +2121,8 @@ mod tests {
         );
 
         unsafe {
-            env::remove_var(BLACKOUT_CONTROLLER_URL_ENV);
-            env::remove_var(AI_WO_A_CONTROLLER_URL_ENV);
+            env::remove_var(BLACKOUT_CONTROLLER_URL);
+            env::remove_var(AI_WO_A_CONTROLLER_URL);
         }
     }
 
