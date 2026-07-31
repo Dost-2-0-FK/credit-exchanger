@@ -218,6 +218,12 @@ impl UsersRepository {
             ));
         }
         sender_resource.apply_amount(-value);
+        sender_resource.add_transfer_history_entry(domain::credit::TransferHistoryEntry::new(
+            -value,
+            sender_id.to_string(),
+            receiver_id.to_string(),
+            "booking".to_string(),
+        ));
 
         let receiver_resources =
             receiver
@@ -225,10 +231,16 @@ impl UsersRepository {
                 .ok_or(crate::db::error::Error::Validation(
                     "Receiver does not have resource credits",
                 ))?;
-        receiver_resources
+        let receiver_resource = receiver_resources
             .entry(resource_name.to_string())
-            .or_insert_with(|| domain::credit::Credit::new(0.0, 0.0, vec![], vec![]))
-            .apply_amount(value);
+            .or_insert_with(|| domain::credit::Credit::new(0.0, 0.0, vec![], vec![]));
+        receiver_resource.apply_amount(value);
+        receiver_resource.add_transfer_history_entry(domain::credit::TransferHistoryEntry::new(
+            value,
+            sender_id.to_string(),
+            receiver_id.to_string(),
+            "booking".to_string(),
+        ));
 
         self.replace_db_user(&sender).await?;
         self.replace_db_user(&receiver).await?;
@@ -392,11 +404,11 @@ impl UsersRepository {
             ));
         }
 
-        let sender = self
+        let mut sender = self
             .get_db_user(sender_id)
             .await?
             .ok_or(crate::db::error::Error::NotFound("sender user"))?;
-        let receiver = self
+        let mut receiver = self
             .get_db_user(receiver_id)
             .await?
             .ok_or(crate::db::error::Error::NotFound("receiver user"))?;
@@ -408,34 +420,30 @@ impl UsersRepository {
             ));
         }
 
-        let receiver_total = receiver.credit_total();
         let updated_sender_total = sender_total - value;
-        let updated_receiver_total = receiver_total + value;
 
-        self.db
-            .update_document_by_field(
-                "users",
-                "_id",
-                sender_id,
-                mongodb::bson::doc! {
-                    "$set": {
-                        "credit.total": updated_sender_total,
-                    }
-                },
-            )
-            .await?;
-        self.db
-            .update_document_by_field(
-                "users",
-                "_id",
-                receiver_id,
-                mongodb::bson::doc! {
-                    "$set": {
-                        "credit.total": updated_receiver_total,
-                    }
-                },
-            )
-            .await?;
+        sender.credit_mut().apply_amount(-value);
+        sender
+            .credit_mut()
+            .add_transfer_history_entry(domain::credit::TransferHistoryEntry::new(
+                -value,
+                sender_id.to_string(),
+                receiver_id.to_string(),
+                "booking".to_string(),
+            ));
+
+        receiver.credit_mut().apply_amount(value);
+        receiver
+            .credit_mut()
+            .add_transfer_history_entry(domain::credit::TransferHistoryEntry::new(
+                value,
+                sender_id.to_string(),
+                receiver_id.to_string(),
+                "booking".to_string(),
+            ));
+
+        self.replace_db_user(&sender).await?;
+        self.replace_db_user(&receiver).await?;
 
         Ok(MoneyBookingOutcome {
             sender_reached_zero: sender.is_individual()

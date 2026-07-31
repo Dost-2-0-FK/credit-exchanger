@@ -19,6 +19,8 @@ pub(crate) struct Credit {
     last_day_average: f32,
     subscription_ids: Vec<String>,
     history: Vec<f32>,
+    #[serde(default)]
+    transfer_history: Vec<domain::credit::TransferHistoryEntry>,
 }
 
 #[derive(Constructor)]
@@ -59,11 +61,12 @@ impl CreditRepository {
             .await?;
 
         // Build and return the domain Credit object
-        let credit = domain::credit::Credit::new(
+        let credit = domain::credit::Credit::with_transfer_history(
             db_credit.total,
             db_credit.last_day_average,
             domain_subscriptions,
             db_credit.history,
+            db_credit.transfer_history,
         );
         Ok(Some(credit))
     }
@@ -80,6 +83,7 @@ impl CreditRepository {
                 .map(|domain_subscription| domain_subscription.id().to_string())
                 .collect(),
             credit.history().to_vec(),
+            credit.transfer_history().to_vec(),
         );
 
         let doc = mongodb::bson::to_document(&db_credit)?;

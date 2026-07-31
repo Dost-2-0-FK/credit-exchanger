@@ -57,6 +57,15 @@ pub(crate) struct CreditEvaluation {
     hit_zero: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Constructor, Clone, PartialEq, ToSchema)]
+pub(crate) struct TransferHistoryEntry {
+    value: f32,
+    sender: String,
+    receiver: String,
+    #[serde(rename = "type")]
+    transfer_type: String,
+}
+
 #[allow(dead_code)]
 impl CreditEvaluation {
     pub(crate) fn booked_subscriptions(&self) -> &[EvaluatedSubscription] {
@@ -96,16 +105,51 @@ impl From<Credit> for ListUserCredit {
     }
 }
 
-#[derive(Serialize, Deserialize, Constructor, Clone, ToSchema)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub(crate) struct Credit {
     total: f32,
     last_day_average: f32,
     #[schema(value_type = Vec<Subscription>)]
+    #[serde(default)]
     subscriptions: Vec<Arc<Subscription>>,
+    #[serde(default)]
     history: Vec<f32>,
+    #[serde(default)]
+    transfer_history: Vec<TransferHistoryEntry>,
 }
 
 impl Credit {
+    pub(crate) fn new(
+        total: f32,
+        last_day_average: f32,
+        subscriptions: Vec<Arc<Subscription>>,
+        history: Vec<f32>,
+    ) -> Self {
+        Self {
+            total,
+            last_day_average,
+            subscriptions,
+            history,
+            transfer_history: vec![],
+        }
+    }
+
+    pub(crate) fn with_transfer_history(
+        total: f32,
+        last_day_average: f32,
+        subscriptions: Vec<Arc<Subscription>>,
+        history: Vec<f32>,
+        transfer_history: Vec<TransferHistoryEntry>,
+    ) -> Self {
+        Self {
+            total,
+            last_day_average,
+            subscriptions,
+            history,
+            transfer_history,
+        }
+    }
+
     pub(crate) fn total(&self) -> f32 {
         self.total
     }
@@ -126,8 +170,20 @@ impl Credit {
         &self.history
     }
 
+    pub(crate) fn transfer_history(&self) -> &[TransferHistoryEntry] {
+        &self.transfer_history
+    }
+
     pub(crate) fn add_subscription(&mut self, subscription: Arc<Subscription>) {
         self.subscriptions.push(subscription);
+    }
+
+    pub(crate) fn add_transfer_history_entry(&mut self, entry: TransferHistoryEntry) {
+        self.transfer_history.push(entry);
+    }
+
+    pub(crate) fn extend_transfer_history(&mut self, entries: Vec<TransferHistoryEntry>) {
+        self.transfer_history.extend(entries);
     }
 
     /// Returns true if a subscription with the given id was found and removed.

@@ -18,7 +18,12 @@ use crate::{
         credit::CreditRepository, mongo_client::MongoClient, subscription::SubscriptionsRepository,
         user::UsersRepository,
     },
-    domain::{self, base_user::BaseUser, bloc_user::BlocUser, credit::Credit},
+    domain::{
+        self,
+        base_user::BaseUser,
+        bloc_user::BlocUser,
+        credit::{Credit, TransferHistoryEntry},
+    },
 };
 
 #[derive(Deserialize, Debug, ToSchema)]
@@ -31,6 +36,15 @@ struct CreditBooking {
 
 const BLACKOUT_CONTROLLER_URL_ENV: &str = "BLACKOUT_CONTROLLER_URL";
 const AI_WO_A_CONTROLLER_URL_ENV: &str = "AI_WO_A_CONTROLLER_URL";
+
+fn transfer_type_from_subscription_type(
+    subscription_type: domain::subscription::SubscriptionType,
+) -> String {
+    match subscription_type {
+        domain::subscription::SubscriptionType::Sr => "sr".to_string(),
+        domain::subscription::SubscriptionType::Contract => "contract".to_string(),
+    }
+}
 
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -373,11 +387,12 @@ async fn create_credit(
         domain_subscriptions.push(Arc::new(subscription));
     }
 
-    let domain_credit = domain::credit::Credit::new(
+    let domain_credit = domain::credit::Credit::with_transfer_history(
         body.total(),
         body.last_day_average(),
         domain_subscriptions,
         body.history().to_vec(),
+        body.transfer_history().to_vec(),
     );
 
     match credit_repository.insert_credit(domain_credit).await {
@@ -557,8 +572,14 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
     };
 
     let mut incoming_amounts: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut incoming_transfers: HashMap<String, Vec<TransferHistoryEntry>> = HashMap::new();
+    let mut outgoing_transfers: HashMap<String, Vec<TransferHistoryEntry>> = HashMap::new();
     // keyed by (receiver_user_id, resource_name)
     let mut resource_incoming_amounts: HashMap<(String, String), Vec<f32>> = HashMap::new();
+    let mut resource_incoming_transfers: HashMap<(String, String), Vec<TransferHistoryEntry>> =
+        HashMap::new();
+    let mut resource_outgoing_transfers: HashMap<(String, String), Vec<TransferHistoryEntry>> =
+        HashMap::new();
     let mut blackout_notifications = Vec::new();
     let mut sr_overflow_notifications = Vec::new();
     let mut evaluated_users = 0usize;
@@ -578,10 +599,31 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
         booked_subscriptions += evaluation.booked_subscriptions().len();
 
         for booked_subscription in evaluation.booked_subscriptions() {
+            let receiver_id = booked_subscription.receiver().to_string();
+            let transfer_type =
+                transfer_type_from_subscription_type(booked_subscription.subscription_type());
             incoming_amounts
-                .entry(booked_subscription.receiver().to_string())
+                .entry(receiver_id.clone())
                 .or_default()
                 .push(booked_subscription.amount());
+            outgoing_transfers
+                .entry(user_id.clone())
+                .or_default()
+                .push(TransferHistoryEntry::new(
+                    -booked_subscription.amount(),
+                    user_id.clone(),
+                    receiver_id.clone(),
+                    transfer_type.clone(),
+                ));
+            incoming_transfers
+                .entry(receiver_id.clone())
+                .or_default()
+                .push(TransferHistoryEntry::new(
+                    booked_subscription.amount(),
+                    user_id.clone(),
+                    receiver_id,
+                    transfer_type,
+                ));
         }
 
         if user.is_individual() && evaluation.hit_zero() {
@@ -603,10 +645,31 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
                 booked_subscriptions += resource_eval.booked_subscriptions().len();
 
                 for booked_sub in resource_eval.booked_subscriptions() {
+                    let receiver_id = booked_sub.receiver().to_string();
+                    let transfer_type =
+                        transfer_type_from_subscription_type(booked_sub.subscription_type());
                     resource_incoming_amounts
-                        .entry((booked_sub.receiver().to_string(), resource_name.clone()))
+                        .entry((receiver_id.clone(), resource_name.clone()))
                         .or_default()
                         .push(booked_sub.amount());
+                    resource_outgoing_transfers
+                        .entry((user_id.clone(), resource_name.clone()))
+                        .or_default()
+                        .push(TransferHistoryEntry::new(
+                            -booked_sub.amount(),
+                            user_id.clone(),
+                            receiver_id.clone(),
+                            transfer_type.clone(),
+                        ));
+                    resource_incoming_transfers
+                        .entry((receiver_id.clone(), resource_name.clone()))
+                        .or_default()
+                        .push(TransferHistoryEntry::new(
+                            booked_sub.amount(),
+                            user_id.clone(),
+                            receiver_id,
+                            transfer_type,
+                        ));
                 }
 
                 for overflow in resource_eval.sr_overflows() {
@@ -626,6 +689,11 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
             let incoming_sum: f32 = incoming.iter().sum();
             user.credit_mut().apply_amount(incoming_sum);
         }
+        let mut money_transfers = outgoing_transfers.remove(&user_id_str).unwrap_or_default();
+        money_transfers.extend(incoming_transfers.remove(&user_id_str).unwrap_or_default());
+        if !money_transfers.is_empty() {
+            user.credit_mut().extend_transfer_history(money_transfers);
+        }
         if !is_unit {
             user.credit_mut().hourly(incoming);
         }
@@ -641,6 +709,14 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
                     .expect("resource name came from resources map");
                 if !res_incoming.is_empty() {
                     resource_credit.apply_amount(res_incoming.iter().sum());
+                }
+                let mut resource_transfers = resource_outgoing_transfers
+                    .remove(&key)
+                    .unwrap_or_default();
+                resource_transfers
+                    .extend(resource_incoming_transfers.remove(&key).unwrap_or_default());
+                if !resource_transfers.is_empty() {
+                    resource_credit.extend_transfer_history(resource_transfers);
                 }
                 if !is_unit {
                     resource_credit.hourly(res_incoming);
@@ -660,6 +736,14 @@ async fn evaluate_hourly(client: web::Data<MongoClient>) -> impl Responder {
                     .or_insert_with(|| Credit::new(0.0, 0.0, vec![], vec![]));
                 if !res_incoming.is_empty() {
                     resource_credit.apply_amount(res_incoming.iter().sum());
+                }
+                let mut resource_transfers = resource_outgoing_transfers
+                    .remove(&key)
+                    .unwrap_or_default();
+                resource_transfers
+                    .extend(resource_incoming_transfers.remove(&key).unwrap_or_default());
+                if !resource_transfers.is_empty() {
+                    resource_credit.extend_transfer_history(resource_transfers);
                 }
                 if !is_unit {
                     resource_credit.hourly(res_incoming);
@@ -1553,6 +1637,41 @@ mod tests {
 
         let body: serde_json::Value = test::read_body_json(get_sender_resp).await;
         assert_eq!(body["credit"]["total"], 0.0);
+        assert_eq!(body["credit"]["transfer_history"].as_array().map(Vec::len), Some(1));
+        assert_eq!(body["credit"]["transfer_history"][0]["value"], -10.0);
+        assert_eq!(
+            body["credit"]["transfer_history"][0]["sender"],
+            "booking_individual_user"
+        );
+        assert_eq!(
+            body["credit"]["transfer_history"][0]["receiver"],
+            "booking_receiver_user"
+        );
+        assert_eq!(body["credit"]["transfer_history"][0]["type"], "booking");
+
+        let get_receiver_req = test::TestRequest::get()
+            .uri("/users/booking_receiver_user")
+            .to_request();
+        let get_receiver_resp = test::call_service(&app, get_receiver_req).await;
+        assert_eq!(get_receiver_resp.status(), actix_web::http::StatusCode::OK);
+        let receiver_body: serde_json::Value = test::read_body_json(get_receiver_resp).await;
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(receiver_body["credit"]["transfer_history"][0]["value"], 10.0);
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"][0]["sender"],
+            "booking_individual_user"
+        );
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"][0]["receiver"],
+            "booking_receiver_user"
+        );
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"][0]["type"],
+            "booking"
+        );
 
         unsafe {
             env::remove_var(BLACKOUT_CONTROLLER_URL_ENV);
@@ -1955,6 +2074,60 @@ mod tests {
             assert_eq!(body["credit"]["total"], expected_total);
             assert_eq!(body["credit"]["history"], expected_history);
         }
+
+        let get_sender_req = test::TestRequest::get()
+            .uri("/users/hourly_sender_zero")
+            .to_request();
+        let get_sender_resp = test::call_service(&app, get_sender_req).await;
+        let sender_body: serde_json::Value = test::read_body_json(get_sender_resp).await;
+        assert_eq!(
+            sender_body["credit"]["transfer_history"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(sender_body["credit"]["transfer_history"][0]["value"], -10.0);
+        assert_eq!(
+            sender_body["credit"]["transfer_history"][0]["sender"],
+            "hourly_sender_zero"
+        );
+        assert_eq!(
+            sender_body["credit"]["transfer_history"][0]["receiver"],
+            "hourly_receiver"
+        );
+        assert_eq!(sender_body["credit"]["transfer_history"][0]["type"], "contract");
+
+        let get_receiver_req = test::TestRequest::get()
+            .uri("/users/hourly_receiver")
+            .to_request();
+        let get_receiver_resp = test::call_service(&app, get_receiver_req).await;
+        let receiver_body: serde_json::Value = test::read_body_json(get_receiver_resp).await;
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(receiver_body["credit"]["transfer_history"][0]["value"], 10.0);
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"][0]["sender"],
+            "hourly_sender_zero"
+        );
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"][0]["receiver"],
+            "hourly_receiver"
+        );
+        assert_eq!(
+            receiver_body["credit"]["transfer_history"][0]["type"],
+            "contract"
+        );
+
+        let get_overflow_sender_req = test::TestRequest::get()
+            .uri("/users/hourly_sender_overflow")
+            .to_request();
+        let get_overflow_sender_resp = test::call_service(&app, get_overflow_sender_req).await;
+        let overflow_sender_body: serde_json::Value =
+            test::read_body_json(get_overflow_sender_resp).await;
+        assert_eq!(
+            overflow_sender_body["credit"]["transfer_history"],
+            serde_json::json!([])
+        );
 
         unsafe {
             env::remove_var(BLACKOUT_CONTROLLER_URL_ENV);

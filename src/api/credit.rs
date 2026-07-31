@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::credit::Credit;
+use crate::domain::credit::{Credit, TransferHistoryEntry};
 
 #[derive(Debug, Deserialize, Clone, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -10,6 +10,8 @@ pub(crate) struct CreateCreditRequest {
     last_day_average: f32,
     subscription_ids: Vec<String>,
     history: Vec<f32>,
+    #[serde(default)]
+    transfer_history: Vec<TransferHistoryEntry>,
 }
 
 impl CreateCreditRequest {
@@ -28,6 +30,10 @@ impl CreateCreditRequest {
     pub(crate) fn history(&self) -> &[f32] {
         &self.history
     }
+
+    pub(crate) fn transfer_history(&self) -> &[TransferHistoryEntry] {
+        &self.transfer_history
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -38,6 +44,7 @@ pub(crate) struct GetCreditResponse {
     last_day_average: f32,
     subscription_ids: Vec<String>,
     history: Vec<f32>,
+    transfer_history: Vec<TransferHistoryEntry>,
 }
 
 impl GetCreditResponse {
@@ -52,6 +59,7 @@ impl GetCreditResponse {
                 .map(|subscription| subscription.id().to_string())
                 .collect(),
             history: credit.history().to_vec(),
+            transfer_history: credit.transfer_history().to_vec(),
         }
     }
 
@@ -62,6 +70,7 @@ impl GetCreditResponse {
             last_day_average: request.last_day_average(),
             subscription_ids: request.subscription_ids().to_vec(),
             history: request.history().to_vec(),
+            transfer_history: request.transfer_history().to_vec(),
         }
     }
 }
